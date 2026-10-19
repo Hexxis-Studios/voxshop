@@ -5,6 +5,7 @@ import { RiggingOverlay } from './components/RiggingOverlay';
 import { EditingOverlay } from './components/EditingOverlay';
 import { PromptModal } from './components/PromptModal';
 import { JsonModal } from './components/JsonModal';
+import { NameDialog, type NameRequest } from './components/NameDialog';
 
 import { SettingsOverlay, type SettingsData } from './components/SettingsOverlay';
 import { RenderSettingsOverlay, RenderSettings, DEFAULT_RENDER_SETTINGS } from './components/RenderSettingsOverlay';
@@ -13,10 +14,13 @@ import { DiagnosticsPanel } from './components/DiagnosticsPanel';
 import { DiagnosticLogEntry, logger, normalizeExternalLog } from './services/logger';
 import { AppState, VoxelData, SymmetryConfig, SavedModel, DetailLevel, Pose, VoxelMaterial, SceneObject } from './types';
 import { SKELETONS } from './utils/riggingConstants';
+import { normalizeVoxels, type ModelDocument } from './services/modelDocument';
+import { localApi } from './services/localApi';
 
 const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
 const getErrorMessage = (error: unknown, fallback = 'Something went wrong'): string =>
   error instanceof Error ? error.message : fallback;
+const readPreference = (key: string): string | null => { try { return localStorage.getItem(key); } catch { return null; } };
 
 const DEFAULT_SETTINGS: SettingsData = {
   apiType: 'proxy',
@@ -31,9 +35,14 @@ const DEFAULT_SETTINGS: SettingsData = {
   diagnosticsIncludeRawResponses: false
 };
 
-const App: React.FC = () => {
+interface SculptProps { initialDocument?: ModelDocument | null; onDocumentChange?: (document: ModelDocument) => void; onSaveAsset?: (name: string, document: ModelDocument) => Promise<void>; embedded?: boolean; active?: boolean; documentOwner?: string }
+const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveAsset, embedded = false, active = true, documentOwner }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<VoxelEngine | null>(null);
+  const externalLoad = useRef(false);
+  const loadedOwner = useRef<string | undefined>(undefined);
+  const generationAbort = useRef<AbortController | null>(null);
+  const changeCallback = useRef(onDocumentChange); changeCallback.current = onDocumentChange;
 
   const [appState, setAppState] = useState<AppState>(AppState.STABLE);
   const [voxelCount, setVoxelCount] = useState<number>(0);
@@ -45,6 +54,8 @@ const App: React.FC = () => {
   const [promptMode, setPromptMode] = useState<'create' | 'morph' | 'rebuild'>('create');
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [nameRequest, setNameRequest] = useState<NameRequest | null>(null);
+  const [saveNotice, setSaveNotice] = useState('');
 
   const [jsonData, setJsonData] = useState('');
   const [isAutoRotate, setIsAutoRotate] = useState(() => {
@@ -82,10 +93,10 @@ const App: React.FC = () => {
   });
 
   const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem('voxelBuilderSettings');
+    const saved = readPreference('voxelBuilderSettings');
     if (saved) {
       try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved), apiKey: '' };
       } catch (e) {
         logger.error('settings.parse.failed', { error: e instanceof Error ? e.message : String(e) });
       }
@@ -96,7 +107,7 @@ const App: React.FC = () => {
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isRenderSettingsOpen, setIsRenderSettingsOpen] = useState(false);
   const [renderSettings, setRenderSettings] = useState<RenderSettings>(DEFAULT_RENDER_SETTINGS);
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(!embedded);
   const [clientLogs, setClientLogs] = useState(logger.getEntries());
   const [serverLogs, setServerLogs] = useState<DiagnosticLogEntry[]>([]);
 
@@ -114,9 +125,10 @@ const App: React.FC = () => {
     );
 
     engineRef.current = engine;
+    engine.onDocumentChange = document => { if (!externalLoad.current) changeCallback.current?.(document); };
 
 
-    const savedSettings = localStorage.getItem('voxelBuilderSettings');
+    const savedSettings = readPreference('voxelBuilderSettings');
     if (savedSettings) {
       try {
         const s = JSON.parse(savedSettings);
@@ -125,7 +137,7 @@ const App: React.FC = () => {
       } catch { /* ignore */ }
     }
 
-    const savedScene = localStorage.getItem('voxelBuilderSceneObjects');
+    const savedScene = embedded ? null : readPreference('voxelBuilderSceneObjects');
     if (savedScene) {
       try {
         const objs: SceneObject[] = JSON.parse(savedScene);
@@ -133,7 +145,7 @@ const App: React.FC = () => {
       } catch { /* ignore */ }
     }
 
-    fetch('http://localhost:4269/api/presets')
+    localApi('/api/presets')
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setPresets(data); })
       .catch(() => {});
@@ -147,12 +159,26 @@ const App: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => { localStorage.setItem('voxelBuilderCustomBuilds', JSON.stringify(customBuilds)); }, [customBuilds]);
-  useEffect(() => { localStorage.setItem('voxelBuilderCustomRebuilds', JSON.stringify(customRebuilds)); }, [customRebuilds]);
-  useEffect(() => { localStorage.setItem('voxelBuilderPromptHistory', JSON.stringify(promptHistory)); }, [promptHistory]);
-  useEffect(() => { localStorage.setItem('voxelBuilderAutoRotate', JSON.stringify(isAutoRotate)); }, [isAutoRotate]);
-  useEffect(() => { localStorage.setItem('voxelBuilderShowGrid', JSON.stringify(showGrid)); }, [showGrid]);
-  useEffect(() => { localStorage.setItem('voxelBuilderSceneObjects', JSON.stringify(sceneObjects)); }, [sceneObjects]);
+  useEffect(() => {
+    if (!initialDocument || !engineRef.current) return;
+    if (loadedOwner.current===documentOwner && JSON.stringify(engineRef.current.getModelDocument()) === JSON.stringify(initialDocument)) return;
+    loadedOwner.current=documentOwner;
+    generationAbort.current?.abort();
+    externalLoad.current = true;
+    try { engineRef.current.loadInitialModel(initialDocument.voxels, initialDocument.skeleton); }
+    finally { externalLoad.current = false; }
+  }, [initialDocument, documentOwner]);
+  useEffect(()=>()=>{generationAbort.current?.abort();},[]);
+  useEffect(() => { if (engineRef.current) { engineRef.current.active = active; if(active)engineRef.current.handleResize(); } }, [active]);
+
+  const persistPreference = (key: string, value: unknown) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { setSaveNotice('Browser preferences could not be saved. Project files and downloaded models remain available.'); } };
+  useEffect(() => { if (!embedded) persistPreference('voxelBuilderCustomBuilds', customBuilds); }, [customBuilds]);
+  useEffect(() => { if (!embedded) persistPreference('voxelBuilderCustomRebuilds', customRebuilds); }, [customRebuilds]);
+  useEffect(() => { persistPreference('voxelBuilderPromptHistory', promptHistory.slice(-30)); }, [promptHistory]);
+  useEffect(() => { persistPreference('voxelBuilderAutoRotate', isAutoRotate); }, [isAutoRotate]);
+  useEffect(() => { persistPreference('voxelBuilderShowGrid', showGrid); }, [showGrid]);
+  useEffect(() => { if (!embedded) persistPreference('voxelBuilderSceneObjects', sceneObjects); }, [sceneObjects]);
+  useEffect(() => { persistPreference('voxelBuilderSettings', { ...settings, apiKey: '' }); }, [settings]);
 
   useEffect(() => logger.subscribe(setClientLogs), []);
 
@@ -178,9 +204,9 @@ const App: React.FC = () => {
     let cancelled = false;
     const pullServerLogs = async () => {
       try {
-        const res = await fetch(diagnosticsUrl);
+        const res = await localApi(diagnosticsUrl);
         if (!res.ok) return;
-        const payload = await res.json();
+        const payload = await res.json() as { logs?: unknown[] };
         if (cancelled || !Array.isArray(payload.logs)) return;
         const normalized = payload.logs.map((log: any) => normalizeExternalLog({ ...log, source: 'server' }));
         setServerLogs(normalized);
@@ -213,10 +239,10 @@ const App: React.FC = () => {
       logger.warn('diagnostics.server.invalid_url', { localUrl });
       return;
     }
-    void fetch(clearUrl, { method: 'POST' }).catch((error) => {
+    void localApi(clearUrl, { method: 'POST' }).catch((error) => {
       const errorMessage = getErrorMessage(error, 'Failed to clear server diagnostics');
       logger.warn('diagnostics.server.clear_failed', { error: errorMessage });
-      alert(`Failed to clear diagnostics: ${errorMessage}`);
+      setSaveNotice(`Failed to clear diagnostics: ${errorMessage}`);
     });
   };
 
@@ -226,15 +252,16 @@ const App: React.FC = () => {
   };
 
   const handleRenameBuild = (model: SavedModel) => {
-    const newName = window.prompt('Rename build:', model.name);
-    if (newName && newName.trim() && newName !== model.name) {
-      setCustomBuilds(prev => prev.map(b => b.name === model.name ? { ...b, name: newName.trim() } : b));
-    }
+    setNameRequest({ title: 'Rename model', initialValue: model.name, confirmLabel: 'Rename', onConfirm: name => {
+      const updated = customBuilds.map(build => build === model ? { ...build, name } : build);
+      localStorage.setItem('voxelBuilderCustomBuilds', JSON.stringify(updated));
+      setCustomBuilds(updated);
+    } });
   };
 
   const handleSelectCustomBuild = (model: SavedModel) => {
       if (engineRef.current) {
-          engineRef.current.loadInitialModel(model.data);
+          engineRef.current.loadInitialModel(model.data, model.skeleton ?? null);
           setCurrentBaseModel(model.name);
       }
   };
@@ -284,45 +311,42 @@ const App: React.FC = () => {
   };
 
   const handleSaveBuild = () => {
-      if (engineRef.current) {
-          const name = prompt("Enter a name for this build:", currentBaseModel);
-          if (name) {
-              const dataStr = engineRef.current.getJsonData();
-              const rawData = JSON.parse(dataStr);
-              const data = rawData.map((v: any) => {
-                  let colorStr = v.c;
-                  if (colorStr.startsWith('#')) colorStr = colorStr.substring(1);
-                  return {
-                      x: v.x,
-                      y: v.y,
-                      z: v.z,
-                      color: parseInt(colorStr, 16)
-                  }
-              });
-              setCustomBuilds(prev => [...prev, { name, data }]);
+      setNameRequest({ title: embedded ? 'Save project asset' : 'Save model', initialValue: currentBaseModel, confirmLabel: 'Save model', onConfirm: async name => {
+          if (!engineRef.current) throw new Error('The editor is not ready yet.');
+          const document = engineRef.current.getModelDocument();
+          if (onSaveAsset) { await onSaveAsset(name, document); setSaveNotice(`Saved "${name}" in this project.`); return; }
+          const updated = [...customBuilds, { name, data: document.voxels, skeleton: document.skeleton }];
+          try {
+              localStorage.setItem('voxelBuilderCustomBuilds', JSON.stringify(updated));
+          } catch {
+              throw new Error('Browser storage is full or unavailable. Download the model JSON to keep a copy.');
           }
-      }
+          setCustomBuilds(updated);
+          setSaveNotice(`Saved "${name}" in this browser.`);
+      } });
   };
 
   const handleSaveAsTemplate = () => {
+      setNameRequest({ title: 'Save template', initialValue: currentBaseModel, confirmLabel: 'Save template', onConfirm: saveTemplate });
+  };
+
+  const saveTemplate = (name: string) => {
       if (!engineRef.current) return;
-      const name = prompt("Template name:", currentBaseModel);
-      if (!name) return;
-      const data = engineRef.current.getVoxelDataForSave();
-      fetch('http://localhost:4269/api/presets', {
+      const { voxels: data, skeleton } = engineRef.current.getModelDocument();
+      localApi('/api/presets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, data }),
+          body: JSON.stringify({ name, data, skeleton }),
       })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('Template save failed'); return r.json(); })
       .then(() => {
           setPresets(prev => {
               const filtered = prev.filter(p => p.name !== name);
-              return [...filtered, { name, data }];
+              return [...filtered, { name, data, skeleton }];
           });
-          alert(`Template "${name}" saved to presets folder.`);
+          setSaveNotice(`Template "${name}" saved to the presets folder.`);
       })
-      .catch(() => alert('Failed to save template — is the bridge server running?'));
+      .catch(() => setSaveNotice('Template save failed. Check that the bridge server is running.'));
   };
 
   const handleShowJson = () => {
@@ -340,28 +364,9 @@ const App: React.FC = () => {
   };
 
   const handleJsonImport = (rawJson: string) => {
-    if (!engineRef.current) return;
-    try {
-      const parsed = JSON.parse(rawJson);
-      if (!Array.isArray(parsed)) throw new Error('Expected a JSON array');
-      const data: VoxelData[] = parsed.map((v: any) => {
-        let color: number;
-        if (typeof v.color === 'number') {
-          color = v.color;
-        } else if (typeof v.c === 'string') {
-          color = parseInt(v.c.replace('#', ''), 16);
-        } else if (typeof v.color === 'string') {
-          color = parseInt(v.color.replace('#', ''), 16);
-        } else {
-          color = 0xCCCCCC;
-        }
-        return { x: v.x || 0, y: v.y || 0, z: v.z || 0, color, bone: v.bone, weights: v.weights, materialType: v.materialType, isLocked: v.isLocked };
-      });
-      engineRef.current.loadInitialModel(data);
-      setCurrentBaseModel('Imported Model');
-    } catch (e: unknown) {
-      alert('JSON Import Failed: ' + getErrorMessage(e));
-    }
+    if (!engineRef.current) throw new Error('The editor is not ready yet.');
+    engineRef.current.importJsonData(rawJson);
+    setCurrentBaseModel('Imported Model');
   };
 
   const handleExportGLTF = (includeAnimations: boolean = true) => {
@@ -443,6 +448,9 @@ const App: React.FC = () => {
   };
 
   const handlePromptSubmit = async (prompt: string, detail: DetailLevel, pose: Pose) => {
+    const checkOwner = captureImportOwner();
+    generationAbort.current?.abort();
+    const controller = new AbortController(); generationAbort.current=controller;
     setIsGenerating(true);
     try {
         const systemMessage = `You are a professional 3D voxel architect. You output ONLY a raw JSON array. Your entire response must start with [ and end with ]. No markdown, no code fences, no backticks, no explanation, no text before or after the array. If you include anything other than the JSON array your output is unusable.`;
@@ -480,7 +488,8 @@ const App: React.FC = () => {
             systemContext += `\nCONTEXT: You are modifying an existing voxel model. Perform "Voxel-Wise Diffing" to only change requested parts while respecting the existing structure and locked flags. Add up to ${morphVoxels} additional voxels for increased detail.`;
         }
 
-        const fullPrompt = `${systemContext}\nTask: Generate voxel model of: "${prompt}".\nRules: Scale within 32x32x32. ${poseInstruction}\nDO NOT write scripts or code to generate the voxels. You must output the RAW JSON array directly.\nReturn ONLY JSON array of {x, y, z, color, materialType}.`;
+        const currentGrid = promptMode === 'morph' ? engineRef.current?.getVoxelDataForSave() : null;
+        const fullPrompt = `${systemContext}\nTask: Generate voxel model of: "${prompt}".\nRules: Scale within 32x32x32. ${poseInstruction}\nDO NOT write scripts or code to generate the voxels. You must output the RAW JSON array directly.\nReturn ONLY JSON array of {x, y, z, color, materialType}.${settings.apiType === 'direct' && currentGrid ? `\nCurrent model (preserve locked voxels): ${JSON.stringify(currentGrid)}` : ''}`;
         if (settings.diagnosticsEnabled && settings.diagnosticsIncludePrompts) {
             logger.info('ai.prompt.submitted', { mode: promptMode, detail, pose, prompt: fullPrompt });
         } else {
@@ -494,13 +503,14 @@ const App: React.FC = () => {
             const model = settings.modelName || 'gpt-4o';
             let activeSystemMessage = systemMessage;
             try {
-                const skillRes = await fetch('http://localhost:4269/api/skill');
+                const skillRes = await localApi('/api/skill');
                 if (skillRes.ok) {
-                    const skillData = await skillRes.json();
+                    const skillData = await skillRes.json() as { content?: string };
                     if (skillData.content) activeSystemMessage = skillData.content;
                 }
             } catch { /* fall back to default system message if skill unavailable */ }
-            const apiResponse = await fetch('http://localhost:4269/api/proxy', {
+            const apiResponse = await localApi('/api/proxy', {
+                signal:controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -516,7 +526,7 @@ const App: React.FC = () => {
                 const errText = await apiResponse.text();
                 throw new Error(`API error ${apiResponse.status}: ${errText.substring(0, 300)}`);
             }
-            const apiData = await apiResponse.json();
+            const apiData = await apiResponse.json() as { choices?: Array<{message?: {content?: string}}> };
             let text = apiData.choices?.[0]?.message?.content || '';
             if (settings.diagnosticsEnabled && settings.diagnosticsIncludeRawResponses) {
                 logger.debug('ai.response.raw', { response: text });
@@ -545,18 +555,19 @@ const App: React.FC = () => {
             }
         } else {
             const url = settings.localUrl || 'http://localhost:4269/api/generate';
-            const response = await fetch(url, {
+            const response = await localApi(url, {
+                signal:controller.signal,
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     prompt: fullPrompt,
-                    currentGrid: promptMode === 'morph' ? engineRef.current?.getJsonData() : null
+                    currentGrid: currentGrid ? JSON.stringify(currentGrid) : null
                 })
             });
             if (!response.ok) {
                 let errorMsg = `Server responded with ${response.status}`;
                 try {
-                    const errData = await response.json();
+                    const errData = await response.json() as { error?: string; details?: string };
                     if (errData.error) errorMsg = errData.error;
                     if (errData.details) errorMsg += ': ' + errData.details;
                 } catch { /* ignore json parse error on error response */ }
@@ -570,25 +581,8 @@ const App: React.FC = () => {
             throw new Error("Invalid response format: Expected a JSON array.");
         }
 
-        const normalizeMaterial = (m: string | undefined): VoxelMaterial => {
-            if (!m) return VoxelMaterial.STANDARD;
-            const u = m.toUpperCase();
-            if (u === 'METALLIC' || u === 'METAL') return VoxelMaterial.METALLIC;
-            if (u === 'GLASS') return VoxelMaterial.GLASS;
-            if (u === 'EMISSIVE' || u === 'EMIT' || u === 'GLOW' || u === 'EMISSION') return VoxelMaterial.EMISSIVE;
-            return VoxelMaterial.STANDARD;
-        };
-        const voxelData: VoxelData[] = rawData.map(v => {
-            const colorStr = typeof v.color === 'string' ? v.color : v.c || '#CCCCCC';
-            const colorInt = parseInt(colorStr.replace('#', ''), 16);
-            return {
-                x: v.x || 0,
-                y: v.y || 0,
-                z: v.z || 0,
-                color: isNaN(colorInt) ? 0xCCCCCC : colorInt,
-                materialType: normalizeMaterial(v.materialType)
-            };
-        });
+        const voxelData = normalizeVoxels(rawData);
+        checkOwner();
 
         if (engineRef.current) {
             const snapshot = JSON.parse(engineRef.current.getJsonData());
@@ -622,7 +616,7 @@ const App: React.FC = () => {
     } catch (err: unknown) {
         const errorMsg = getErrorMessage(err);
         logger.error('ai.generation.failed', { message: errorMsg });
-        alert(`Generation Failed: ${errorMsg}`);
+        setSaveNotice(`Generation failed: ${errorMsg}`);
     } finally {
         setIsGenerating(false);
     }
@@ -630,7 +624,7 @@ const App: React.FC = () => {
 
   const handleSaveSettings = (newSettings: SettingsData) => {
       setSettings(newSettings);
-      localStorage.setItem('voxelBuilderSettings', JSON.stringify(newSettings));
+      persistPreference('voxelBuilderSettings', { ...newSettings, apiKey: '' });
       if (newSettings.backgroundColor) engineRef.current?.setBackgroundColor(newSettings.backgroundColor);
       if (newSettings.gridColor) engineRef.current?.setGridColor(newSettings.gridColor);
       setIsSettingsOpen(false);
@@ -659,23 +653,34 @@ const App: React.FC = () => {
 
   const handleImageImport = async (file: File) => {
       if (engineRef.current) {
+          try {
           await engineRef.current.voxelizeImage(file);
           setCurrentBaseModel(file.name);
+          } catch(e) {setSaveNotice(getErrorMessage(e,'Image import failed.'));}
       }
   };
 
+  function captureImportOwner() {
+    const engine = engineRef.current;
+    if(!engine)throw new Error('The sculpt editor is not ready.');
+    const revision = engine.documentRevision;
+    return () => { if(engineRef.current!==engine||engine.documentRevision!==revision)throw new Error('Operation cancelled because the active model changed. Start it again for the current model.'); };
+  }
+
   const handleMeshImport = async (file: File) => {
       if (!engineRef.current) return;
-      const choice = window.prompt(
-        'Voxel resolution — enter a number or leave "auto":\n\n  auto  = recommended (snaps to the original grid for Voxel Studio exports)\n  16    = coarse / fast\n  32    = balanced\n  64    = high detail\n  96    = very high (slow on complex models)',
-        'auto'
-      );
+      const checkOwner=captureImportOwner();
+      const choice = await new Promise<string | null>(resolve=>setNameRequest({title:'Import 3D mesh',inputLabel:'Voxel resolution · auto, or 8–128',initialValue:'auto',confirmLabel:'Import mesh',onCancel:()=>resolve(null),onConfirm:value=>{
+        if(value.toLowerCase()!=='auto'&&(!/^\d+$/.test(value)||Number(value)<8||Number(value)>128))throw new Error('Enter auto or a whole number from 8 to 128.');
+        resolve(value);
+      }}));
       if (choice === null) return;
       const resolution: number | null = (choice.trim().toLowerCase() === 'auto')
         ? null
         : Math.max(8, Math.min(128, parseInt(choice) || 32));
 
       try {
+          checkOwner();
           const name = file.name.toLowerCase();
           const isSTL = name.endsWith('.stl');
           const isGLTF = name.endsWith('.glb') || name.endsWith('.gltf');
@@ -688,14 +693,14 @@ const App: React.FC = () => {
               const geometry = loader.parse(await file.arrayBuffer());
               const THREE = await import('three');
               const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
-              await engineRef.current.voxelizeMesh(mesh, resolution);
+              checkOwner(); await engineRef.current.voxelizeMesh(mesh, resolution);
           } else if (isPLY) {
               const { PLYLoader } = await import('three/addons/loaders/PLYLoader.js');
               const loader = new PLYLoader();
               const geometry = loader.parse(await file.arrayBuffer());
               const THREE = await import('three');
               const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
-              await engineRef.current.voxelizeMesh(mesh, resolution);
+              checkOwner(); await engineRef.current.voxelizeMesh(mesh, resolution);
           } else if (isFBX) {
               const { FBXLoader } = await import('three/addons/loaders/FBXLoader.js');
               const loader = new FBXLoader();
@@ -704,7 +709,7 @@ const App: React.FC = () => {
                   const object = await new Promise<any>((resolve, reject) => {
                       loader.load(url, resolve, undefined, reject);
                   });
-                  await engineRef.current.voxelizeMesh(object, resolution);
+                  checkOwner(); await engineRef.current.voxelizeMesh(object, resolution);
               } finally {
                   URL.revokeObjectURL(url);
               }
@@ -719,34 +724,30 @@ const App: React.FC = () => {
                   });
                   if (isGLTF) {
                       let embeddedRaw: any[] | null = null;
+                      let embeddedSkeleton = null;
                       const scene = result.scene;
                       if (scene) {
                           if (Array.isArray(scene.userData?.voxelData)) {
                               embeddedRaw = scene.userData.voxelData;
+                              embeddedSkeleton = scene.userData.voxshopSkeleton ?? null;
                           } else {
                               scene.traverse((child: any) => {
                                   if (!embeddedRaw && Array.isArray(child.userData?.voxelData)) {
                                       embeddedRaw = child.userData.voxelData;
+                                      embeddedSkeleton = child.userData.voxshopSkeleton ?? null;
                                   }
                               });
                           }
                       }
                       if (embeddedRaw) {
-                          const voxelData: VoxelData[] = embeddedRaw.map((v: any) => ({
-                              x: v.x, y: v.y, z: v.z,
-                              color: parseInt((v.c || '#CCCCCC').replace('#', ''), 16),
-                              materialType: v.m || VoxelMaterial.STANDARD,
-                              bone: v.b,
-                              weights: v.w,
-                              isLocked: !!v.l
-                          }));
-                          engineRef.current.loadInitialModel(voxelData);
+                          checkOwner();
+                          engineRef.current.loadInitialModel(normalizeVoxels(embeddedRaw), embeddedSkeleton);
                           setCurrentBaseModel(file.name);
                           return;
                       }
                   }
                   const object = result.scene || result;
-                  await engineRef.current.voxelizeMesh(object, resolution);
+                  checkOwner(); await engineRef.current.voxelizeMesh(object, resolution);
               } finally {
                   URL.revokeObjectURL(url);
               }
@@ -754,50 +755,57 @@ const App: React.FC = () => {
           setCurrentBaseModel(file.name);
       } catch (e) {
           logger.error('mesh.import.failed', { error: e instanceof Error ? e.message : String(e) });
-          alert("Failed to load mesh file.");
+          setSaveNotice(`Mesh import failed: ${getErrorMessage(e)}`);
       }
   };
 
   const handleVoxImport = async (file: File) => {
       if (!engineRef.current) return;
+      const checkOwner=captureImportOwner();
       try {
           const data = engineRef.current.importVOX(await file.arrayBuffer());
+          checkOwner();
           engineRef.current.loadInitialModel(data);
           setCurrentBaseModel(file.name);
       } catch (e: unknown) {
-          alert('VOX Import Failed: ' + getErrorMessage(e));
+          setSaveNotice('VOX import failed: ' + getErrorMessage(e));
       }
   };
 
   const handleQBImport = async (file: File) => {
       if (!engineRef.current) return;
+      const checkOwner=captureImportOwner();
       try {
           const data = engineRef.current.importQB(await file.arrayBuffer());
+          checkOwner();
           engineRef.current.loadInitialModel(data);
           setCurrentBaseModel(file.name);
       } catch (e: unknown) {
-          alert('QB Import Failed: ' + getErrorMessage(e));
+          setSaveNotice('QB import failed: ' + getErrorMessage(e));
       }
   };
 
   const handleMinecraftImport = async (file: File) => {
       if (!engineRef.current) return;
+      const checkOwner=captureImportOwner();
       try {
           const data = await engineRef.current.importMinecraft(await file.arrayBuffer());
+          checkOwner();
           engineRef.current.loadInitialModel(data);
           setCurrentBaseModel(file.name);
       } catch (e: unknown) {
-          alert('Minecraft Import Failed: ' + getErrorMessage(e));
+          setSaveNotice('Minecraft import failed: ' + getErrorMessage(e));
       }
   };
 
-  const handleTextVoxelize = (text: string) => {
-      engineRef.current?.voxelizeText(text);
+  const handleTextVoxelize = (text?: string) => {
+      if(text===undefined){setNameRequest({title:'Text to voxels',inputLabel:'Text',initialValue:'VoxShop',confirmLabel:'Create text',onConfirm:value=>handleTextVoxelize(value)});return;}
+      try { engineRef.current?.voxelizeText(text); } catch(e) {setSaveNotice(getErrorMessage(e));}
   };
 
   const handleExportHistory = () => {
       if (promptHistory.length === 0) {
-          alert("No history to export yet.");
+          setSaveNotice('No history to export yet.');
           return;
       }
       const data = JSON.stringify(promptHistory, null, 2);
@@ -811,7 +819,7 @@ const App: React.FC = () => {
   const isEditing = appState === AppState.EDITING;
 
   return (
-    <div className="relative w-full h-screen bg-[#0d1117] overflow-hidden">
+    <div className={`relative w-full ${embedded ? 'h-full' : 'h-screen'} bg-[#0d1117] overflow-hidden`}>
       {showSplash && <SplashScreen onEnter={() => setShowSplash(false)} />}
       <div ref={containerRef} className="absolute inset-0" />
 
@@ -822,8 +830,8 @@ const App: React.FC = () => {
               appState={appState}
               currentBaseModel={currentBaseModel}
               presets={presets}
-              customBuilds={customBuilds}
-              customRebuilds={relevantRebuilds}
+              customBuilds={embedded ? [] : customBuilds}
+              customRebuilds={embedded ? [] : relevantRebuilds}
               isAutoRotate={isAutoRotate}
               showGrid={showGrid}
               isGenerating={isGenerating}
@@ -848,10 +856,10 @@ const App: React.FC = () => {
               onExportFBX={() => handleExportGLTF(true)}
               onExportPLY={() => engineRef.current?.exportPLY()}
               onExportSTL={() => engineRef.current?.exportSTL()}
-              onExportVOX={() => engineRef.current?.exportVOX()}
-              onExportQB={() => engineRef.current?.exportQB()}
+              onExportVOX={() => void engineRef.current?.exportVOX().catch(e=>setSaveNotice(e.message))}
+              onExportQB={() => void engineRef.current?.exportQB().catch(e=>setSaveNotice(e.message))}
               onExportPNG={() => engineRef.current?.exportPNG()}
-              onExportMinecraft={(fmt) => engineRef.current?.exportMinecraft(fmt)}
+              onExportMinecraft={(fmt) => void engineRef.current?.exportMinecraft(fmt).catch(e=>setSaveNotice(e.message))}
               onToggleRotation={handleToggleRotation}
               onToggleGrid={handleToggleGrid}
               onResetCamera={() => engineRef.current?.resetCamera()}
@@ -881,7 +889,7 @@ const App: React.FC = () => {
 
               {isRigging && (
               <RiggingOverlay
-                initialSkeleton={engineRef.current?.currentSkeletonDef}
+                initialSkeleton={engineRef.current?.currentSkeletonDef ?? null}
                 hasRigData={engineRef.current?.hasRigData || false}
                 onClose={handleExitRigging}
                 onEnablePaint={(bone, color) => engineRef.current?.enablePainting(bone, color)}
@@ -927,6 +935,11 @@ const App: React.FC = () => {
       </div>
 
       <div className="z-[100]">
+          <NameDialog request={nameRequest} onClose={() => setNameRequest(null)} />
+          {saveNotice && <div role="status" className="fixed bottom-4 left-4 z-[100] flex max-w-sm items-center gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white shadow-xl">
+              <span>{saveNotice}</span>
+              <button aria-label="Dismiss save message" onClick={() => setSaveNotice('')} className="rounded px-2 py-1 hover:bg-white/10">×</button>
+          </div>}
           <RenderSettingsOverlay
             isOpen={isRenderSettingsOpen}
             onClose={() => setIsRenderSettingsOpen(false)}
@@ -950,7 +963,7 @@ const App: React.FC = () => {
             onClear={handleClearDiagnostics}
             appVersion={APP_VERSION}
             settingsSummary={{
-              render: renderSettings,
+              render: { ...renderSettings },
               ai: {
                 mode: settings.apiType,
                 model: settings.modelName || 'unknown',

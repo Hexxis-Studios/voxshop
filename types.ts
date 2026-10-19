@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import type * as THREE from 'three';
+import type { SkeletonDef } from './utils/riggingConstants';
 
 export enum AppState {
   STABLE = 'STABLE',
@@ -82,22 +83,8 @@ export interface RebuildTarget {
 }
 
 export interface VoxelDelta {
-  action: 'add' | 'delete' | 'paint' | 'move' | 'lock';
-  voxels: {
-    x: number;
-    y: number;
-    z: number;
-    oldColor?: number;
-    newColor?: number;
-    oldPos?: { x: number, y: number, z: number };
-    newPos?: { x: number, y: number, z: number };
-    wasLocked?: boolean;
-  }[];
-}
-
-export interface ChangeLogEntry {
-  timestamp: number;
-  delta: VoxelDelta;
+  action: 'add' | 'delete' | 'paint' | 'move' | 'lock' | 'fill' | 'replace' | 'transform';
+  voxels: { before: VoxelData | null; after: VoxelData | null }[];
 }
 
 export interface SymmetryConfig {
@@ -110,6 +97,7 @@ export interface SavedModel {
   name: string;
   data: VoxelData[];
   baseModel?: string;
+  skeleton?: SkeletonDef | null;
 }
 
 export interface SceneObject {

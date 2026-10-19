@@ -133,7 +133,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClos
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">API Key</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">API Key · this session only</label>
                     <input
                       type="password"
                       value={settings.apiKey || ''}
