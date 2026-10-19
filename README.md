@@ -1,272 +1,93 @@
 # VoxShop
 
-An AI-powered 3D voxel workshop. Generate, sculpt, animate, and export voxel models using any AI engine — CLI agents, direct API keys, or fully offline with local models. No subscription required.
+A voxel game studio with a private hosted editor and a local desktop workspace. Generate original editable assets, sculpt them, rig and equip characters, build scenes, author gameplay, playtest, and export independent browser games. Compatible agents can operate the same project through MCP.
 
-[![Support on PayPal](https://img.shields.io/badge/Support-PayPal-blue?style=for-the-badge&logo=paypal)](https://www.paypal.com/ncp/payment/MNF5JL9WPEJ92)
+VoxShop uses React, TypeScript and Three.js. The first engine milestone targets desktop browsers with keyboard/mouse and WebGL2. It includes a flexible component and event/action system; it does not aim for feature parity with Unity, Unreal or Godot.
 
----
+## Start
 
-## Setup
+Open [VoxShop Studio](https://voxshop-studio.soft-corgi-2100.chatgpt.site) and sign in with its owning ChatGPT account to use the private hosted editor. Built-in generation, cloud saves, gameplay and exports run there without a local installation. The separate Alex-account copy remains at [its existing address](https://voxshop-studio.tr9yqntxdy.chatgpt.site); each account has separate saved projects.
 
-**Prerequisites:** Node.js (LTS)
+For a local workspace and desktop MCP server:
 
-```bash
-npm install
+Install Node.js 24 or later, then run:
+
+```sh
+npm ci
+npm run build
+npm start
 ```
 
-**Start:**
-```bash
-npm run dev
+Open [VoxShop](http://localhost:4269). For development, `npm run dev` starts the editor at [127.0.0.1:3000](http://127.0.0.1:3000) with automatic client and server reloads. `start.bat` starts development mode on Windows.
+
+No AI subscription, key or account is required for the built-in generators, editor, gameplay or exports. Your chosen agent or optional AI provider has its own requirements.
+
+## Make a first game
+
+1. Open **Crystal trail** or **Arena** to explore an editable example, or create a new project.
+2. Choose **Generate** for a character, creature, machine, prop, terrain, or custom mathematical shape recipe.
+3. Newly generated assets open in the inspector automatically. Choose **Place first asset** or **Place in scene**, then change position, rotation, scale and parent in the scene object's inspector.
+4. Add components such as player controls, collider, collectibles, gates, health, enemies, patrols, animation or custom rules. Press **Apply object changes** to save inspector edits.
+5. For a rigged asset, generate a fitted shell, backpack or blade. Add it to a scene object's equipment slots. Equipment remains a separate editable asset.
+6. Press **Play**. WASD/arrows move, Space jumps, E interacts, and F/click attacks nearby enemies. **Stop** restores the authoring scene.
+7. Use **Run playtest** for a repeatable scenario and JSON report. The two examples include complete win-condition scenarios; custom projects can define their own inputs and assertions.
+8. **Export game** downloads one self-contained HTML file. Open it directly or host it as a static file. Players need a WebGL2 browser; the editor, agent, MCP service, AI keys and network AI are unnecessary.
+
+**Crystal trail** uses a third-person creature, separate backpack and fitted shell, five collectibles, a conditional gate and a goal. **Arena** uses a top-down robot, equipment, pursuing enemies, health, melee attacks and an exit unlocked by defeating the enemies. Both use the same runtime and authoring contracts.
+
+## Talk to your agent
+
+In the hosted editor, open **Connect agent** and install or connect your account's VoxShop plugin under Plugins → Personal → Created by you. For the local editor, copy its generated MCP configuration into a client that supports local process (stdio) MCP servers. It includes the actual Node and server paths for your machine. Build first so that local server exists.
+
+For example, ask your agent:
+
+> Create a small exploration game with a quadruped carrying a backpack. Generate the assets, place five crystals, make the gate require all five, run a playtest and export the game.
+
+Voice comes from your agent's voice interface. VoxShop exposes structured tools for projects, generation, inspection, editing, previews, undo/redo, playtests and builds. The agent uses the same validated, revisioned project service as the editor. See the [MCP and engine API guide](docs/engine-api.md) and [agent workflow](skills/VOXSHOP_AGENT.md).
+
+## Sculpt and import assets
+
+Select an asset and choose **Sculpt asset**, or **Sculpt from blank**. The existing workshop remains available: add, move, paint, delete, fill, lock, symmetry, brushes, rig painting, animation preview, image/text/mesh conversion, materials and export tools.
+
+Sculpt changes to an opened project asset save automatically to that asset. Blank sculpt work saves as a project draft until **Save** gives it an asset name. Variants create independent geometry; scene instances reference shared assets, so editing an asset updates its instances.
+
+Native model JSON uses `voxshop-model` version 1 and preserves colors, materials, locks, weights and the legacy animation profile. Legacy voxel arrays remain readable. The workshop also offers existing GLB, OBJ, PLY, STL, VOX, QB, PNG and Minecraft conversion paths. Formats differ in what they preserve; use native project/model JSON for editable backups. The new engine's explicit rig/socket contract is preserved in project files and game exports; the workshop's legacy mesh exporters do not yet export every new scene/equipment feature.
+
+Optional direct AI generation accepts an OpenAI-compatible chat endpoint. API keys remain in memory for the current editor session. Configure the exact endpoint origin using `VOXSHOP_AI_ORIGINS` if it is outside the default OpenAI, Google, Ollama and LM Studio origins. The compatibility file worker is optional and uses separate request directories; it is not required for MCP. See [storage and local services](docs/storage-and-security.md).
+
+## Save and recover
+
+Projects are saved under `.voxshop/projects/` in the repository directory by default. Every accepted project transaction saves immediately using an atomic replacement and retains the previous save. Project undo/redo survives server restarts and is bounded to 20 entries and 32 MiB of history.
+
+**Save project** downloads a portable `.voxshop.json` file. **Import** validates the complete document and creates a new project without replacing an existing project. Browser recovery stores unsent sculpt work in IndexedDB. If a save conflicts with an agent's changes, recovery can keep the sculpt as a separate asset. A damaged project can be restored explicitly from its previous save, preserving a copy of the damaged file.
+
+Legacy browser libraries and simple scenes migrate once into an empty project. The original browser data remains intact. Browser origins have separate storage, so use the same host (`localhost` or `127.0.0.1`) when migrating an old library. Download portable backups before clearing browser storage or moving installations.
+
+## Current scope
+
+- Local, single-broker authoring with stable IDs, atomic batches, revisions, retry receipts, saved undo/redo and live editor updates.
+- Composable box, ellipsoid, cylinder and seeded terrain generation; biped, quadruped and machine starter rigs; editable custom rigs and animation data.
+- Rigid joint attachments and an initial body-shell fit against declared torso landmarks. Fitting unrelated imported clothing to arbitrary bodies is not supported.
+- Scene hierarchy and full transforms; bounded fixed-step gameplay with conservative axis-aligned collision boxes. This is not a general rigid-body physics solver or navigation-mesh system.
+- Custom logic through the versioned event/action API. Arbitrary JavaScript, shell execution, native plugins, multiplayer, large streaming worlds and native mobile builds are outside this milestone.
+- Asset PNG previews and simulation test reports through MCP. A static preview is not an animation or gameplay certification.
+
+## Development
+
+See [Sites hosting](docs/sites-hosting.md) for cloud deployment details, account identities and current limits. Both hosted checkouts are preserved, and source synchronization checks their identity before copying. Local projects and the desktop MCP service remain available through the commands below.
+
+```sh
+npm run lint
+npm test
+npm run build
+npm audit
+npm run verify:release
 ```
 
-Or double-click `start.bat`.
+`npm test` builds the standalone runtime and runs document, command, persistence, recovery, cancellation, rigging, gameplay, export and external MCP-client tests. CI is configured for Windows and Linux. See [architecture and API](docs/engine-api.md), [implementation status](docs/implementation-status.md), and [verification evidence](docs/verification.md) for the distinction between automated checks, browser observations and remaining limitations.
 
-This launches the bridge server (port 4269) and the Vite dev server (port 3000). Open `http://localhost:3000` in your browser.
+`npm run verify:release` starts a built broker on loopback port 4329 using an isolated `.voxshop/release-verification` workspace, launches the built MCP server through a separate client, completes both example scenarios, saves portable projects and writes standalone games plus a report. It leaves the creator's normal workspace untouched.
 
----
+Built by [Hexxis Studios](https://github.com/Hexxis-Studios/voxshop). [Support development](https://www.paypal.com/ncp/payment/MNF5JL9WPEJ92).
 
-## Connecting AI
-
-### Option A — CLI Worker (Free for students with gemini pro, any agent/or model)
-
-Works with Gemini CLI, Claude Code, or any CLI tool that reads/writes files.
-
-In **Settings → Local Worker**, set the bridge URL to `http://localhost:4269/api/generate`.
-
-Open a terminal in the project folder:
-
-**Gemini CLI:**
-```
-gemini --yolo
-> Activate the skill in ./skills/VOXEL_SKILL.md
-```
-Flash models work, but pro will give better results. (Gemini is offering a year for pro for free to students, i highly recommend checking that out)
-
-**Claude Code:**
-```
-claude
-> Activate the skill in ./skills/VOXEL_SKILL.md
-```
-
-P.S. CLI wont hang indefinitely so you will need to tell it to check for requests as you make them, this is tedious but its a work around if you do not have api key but do have pro access in your terminals. enjoy. :)
----
-
-### Option B — Direct API Key
-
-In **Settings → Direct API**, set the endpoint, model, and key.
-
-| Provider | Endpoint | Model |
-|----------|----------|-------|
-| Google AI Studio (free tier) | `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` | `gemini-2.5-flash` |
-| OpenAI | `https://api.openai.com/v1/chat/completions` | `gpt-4o` |
-| Groq (fast free tier) | `https://api.groq.com/openai/v1/chat/completions` | `llama-3.3-70b-versatile` |
-
----
-
-### Option C — Local Model (Offline)
-
-**Ollama:**
-1. Install [Ollama](https://ollama.com) and pull a model: `ollama pull llama3.2`
-2. Settings → Direct API → Endpoint: `http://localhost:11434/v1/chat/completions`, Model: `llama3.2`, Key: `ollama`
-
-**LM Studio:**
-1. Load a model and start the local server in LM Studio
-2. Settings → Direct API → Endpoint: `http://localhost:1234/v1/chat/completions`, Model: match whatever is loaded
-
----
-
-## Feature Guide
-
-### CREATE Menu
-
-**AI Generation**
-Click `CREATE → AI Generation`, type a description, can be simple 1 word like "troll" or you can get more detailed with it, though keep in mind this is to make building your models quicker, it is not perfect, then click submit. The AI generates and loads the model directly into the viewport. Works with all three AI connection methods above.
-
-**Iterative Morph (ITERATE)**
-Load or generate a model, then click the `ITERATE` button on the right toolbar. Lock any voxels you want to preserve first, then describe what to change. The AI only modifies unlocked voxels.
-
-**AI Reconstruction (DISMANTLE)**
-Click `DISMANTLE` or the death sequence to scatter the current model into an explosion of voxels. The `REBUILD OPTIONS` menu then appears — choose `AI Reconstruction` to describe a new form, and the voxels fly into the new shape.
-
-**Load Fox Template**
-Loads a built-in red fox model as a starting point or reference.
-
-**New Empty Scene**
-Clears the viewport to a blank grid.
-
----
-
-### Converters
-
-**Image to Voxel**
-`CREATE → Image to Voxel` — select any PNG or JPG.
-- PNG with a transparent background: imports as a solid 3D slab shaped like the image cutout (clean flat faces on front and back).
-- Fully opaque image (photo, no transparency): imports as a flat single-layer plane.
-
-**Text to Voxel**
-`CREATE → Text to Voxel` — type any text. Instantly generates flat 3D lettering.
-
-**Mesh to Voxel**
-`CREATE → Import — 3D Mesh` — import a GLB, OBJ, STL, PLY, or FBX file. VoxShop voxelizes the mesh geometry. A resolution prompt appears: enter a number (16–128) or `auto`.
-
----
-
-### Procedural Generation
-
-`CREATE → Procedural` — one-click generation:
-- **Sphere** — filled voxel sphere
-- **Terrain** — heightmap terrain chunk
-- **Noise Blob** — organic noise-based form
-
----
-
-### SCULPT (Editing Studio)
-
-Click `SCULPT` on the right toolbar to open the sculpting panel.
-
-**Tools**
-| Tool | Action |
-|------|--------|
-| Move | Click and drag a voxel to reposition it |
-| Paint | Click to recolor voxels |
-| Add | Click empty space adjacent to a voxel to add one |
-| Delete | Click a voxel to remove it |
-| Lock | Click a voxel to protect it from AI changes and accidental edits |
-| Fill | Flood-fill all connected voxels of the same color |
-
-**Brush**
-Switch between Point, Sphere, and Cube brush shapes. Sphere and Cube brushes have an adjustable size slider.
-
-**Mirror Pipeline**
-Enables symmetry sculpting. Toggle X, Y, or Z to mirror every brush stroke across that axis simultaneously.
-
-**Transform**
-One-click model-wide transforms:
-- **Flip X / Y / Z** — mirror the entire model along that axis
-- **Rot CCW / Rot CW** — rotate the model 90° around the Y axis
-
-**Material Tag**
-Assign a PBR material type to new voxels:
-| Material | Use case |
-|----------|----------|
-| Standard | Skin, stone, wood, cloth |
-| Metallic | Armor, robots, weapons |
-| Glass | Eyes, gems, crystals, windows |
-| Emissive | Fire, glow, neon, bioluminescence |
-
-**Color Picker**
-Infinite color wheel plus a palette of colors already present in the current model.
-
-**Undo / Redo**
-Full unlimited undo and redo for all sculpt operations.
-
----
-
-### RIGGING (Kinematics Engine)
-
-Click `RIGGING` on the right toolbar.
-
-**1. Choose a Skeleton Profile**
-Select from Humanoid, Quadruped, Bird, or any custom skeleton profile.
-
-**2. Solve Initial Weights**
-Click `Solve Initial Weights` — VoxShop auto-assigns bone weights based on proximity.
-
-**3. Weight Painting (optional)**
-Click any bone in the list to activate it, then paint directly on the model to manually adjust which voxels belong to that bone.
-
-**4. Compile**
-Click `Compile Manual Edits` to apply your weight painting.
-
-**5. Preview Animations**
-Click any animation in the Sequencer (Idle, Walk, Attack, etc.) to preview it live. Click `Stop Sequencer` to return to bind pose. `Shatter Preview` triggers a physics explosion using the rig.
-
----
-
-### RENDER Settings
-
-Click `RENDER` on the right toolbar.
-
-- **Bloom** — toggle glow and adjust intensity
-- **Ambient Occlusion** — bakes soft shadows into the geometry (also baked into exports)
-- **Tone Mapping** — Off / Cinematic / ACES Filmic
-- **Solid Surface Preview** — toggles between individual voxels and a merged greedy-meshed surface view
-
----
-
-### Scene Builder
-
-Place multiple saved models into a shared scene.
-
-1. Generate or sculpt a model, then click **Save** in the toolbar
-2. Open `CREATE` — your saved model appears under **Saved Library**
-3. Hover the model and click the **pin icon** to place it in the scene
-4. The **Scene Objects** panel (bottom-left) appears — use the arrow buttons to reposition each object
-5. Click the X to remove an object from the scene
-6. Scene layout persists across page refreshes
-
----
-
-### EXPORT
-
-Open the `EXPORT` dropdown in the top-right toolbar.
-
-| Format | Button | Notes |
-|--------|--------|-------|
-| GLB (static) | Game-Ready (.glb) | Geometry only, no animation clips. Best for static props. |
-| GLB (animated) | 3D Animation (.glb) | Full rig + all animation clips baked in. Best for game characters. |
-| OBJ | Static Mesh (.obj) | Wavefront OBJ, no rig |
-| PLY | Point Cloud (.ply) | |
-| STL | 3D Printing (.stl) | Ready for slicers |
-| VOX | MagicaVoxel (.vox) | Opens in MagicaVoxel |
-| QB | Qubicle (.qb) | Opens in Qubicle |
-| PNG | 2D Snapshot (.png) | Screenshots the current viewport |
-| NBT | .NBT | Minecraft structure (load with Structure Blocks) |
-| Schematic | .SCHEM | WorldEdit legacy format |
-| Litematic | .LITE | Litematica mod format |
-| JSON | Workstation Data | Full voxel data including materials, bones, weights, and locks |
-| Log | Prompt History | All AI prompts used to build the model |
-
-The same export options are also available inside the **Rigging** panel, with the addition of a **Rigged Only .GLB** option (rig without animation clips).
-
----
-
-### IMPORT
-
-Open `CREATE` and scroll to the import sections.
-
-**Native Voxel**
-| Format | Notes |
-|--------|-------|
-| Voxel Studio JSON | VoxShop's own format — preserves all materials, bones, and locks |
-| MagicaVoxel (.vox) | Imports palette and geometry |
-| Qubicle (.qb) | Imports compressed and uncompressed |
-| Minecraft NBT | Structure file or VoxShop NBT export |
-| Minecraft Schematic | WorldEdit .schematic (gzip-compressed) |
-| Minecraft Litematic | Litematica .litematic — full BlockStatePalette support |
-
-**3D Mesh (Voxelized)**
-All mesh imports prompt for a voxel resolution before converting.
-| Format | Notes |
-|--------|-------|
-| GLB / GLTF | If the file was exported from VoxShop, original voxel data is restored exactly. Otherwise the mesh is voxelized. |
-| OBJ | Voxelized |
-| STL | Voxelized |
-| PLY | Voxelized |
-| FBX | Voxelized via Three.js FBXLoader |
-
----
-
-## Developer
-
-Built by **[Hexxis-Cmd](https://github.com/Hexxis-cmd/voxshop)**.
-
-VoxShop is free and open. If it's useful to you, consider supporting development:
-
-[![Support on PayPal](https://img.shields.io/badge/Support-PayPal-blue?style=for-the-badge&logo=paypal)](https://www.paypal.com/ncp/payment/MNF5JL9WPEJ92)
-
----
-
-## License
-
-SPDX-License-Identifier: Apache-2.0
+The project retains its existing Apache-2.0 license. The reference generator discussed during the audit was used for design study only; its GPL code and generated assets were not copied into VoxShop. Standalone builds include Three.js license notices.

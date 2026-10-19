@@ -6,11 +6,19 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createNoise2D, createNoise3D } from 'simplex-noise';
-import { AppState, SimulationVoxel, RebuildTarget, VoxelData, VoxelDelta, ChangeLogEntry, VoxelMaterial, VoxelWeight, SceneObject } from '../types';
+import { AppState, SimulationVoxel, RebuildTarget, VoxelData, VoxelDelta, VoxelMaterial, VoxelWeight, SceneObject } from '../types';
 import { CONFIG } from '../utils/voxelConstants';
 import { SkeletonDef, SKELETONS } from '../utils/riggingConstants';
+import { cloneSkeleton, cloneVoxel, createModelDocument, normalizeVoxels, parseModelDocument, serializeModelDocument, type ModelDocument } from './modelDocument';
+import { applyVoxelCommand, createMoveCommand, createVoxelEdit, replaceModelCommand, type VoxelEdit } from './modelCommands';
 
 export class VoxelEngine {
+  public onDocumentChange?: (document: ModelDocument) => void;
+  public active = true;
+  private replayVersion = 0;
+  private replaySource: VoxelData[] | null = null;
+  private documentVersion = 0;
+  public get documentRevision() { return this.documentVersion ?? 0; }
   private container: HTMLElement;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -36,7 +44,6 @@ export class VoxelEngine {
   private symmetryZ = false;
   private undoStack: VoxelDelta[] = [];
   private redoStack: VoxelDelta[] = [];
-  private changeLog: ChangeLogEntry[] = [];
   private initialModelState: VoxelData[] = [];
   private voxelSnapshot: VoxelData[] | null = null;
   public brushType: 'single' | 'sphere' | 'box' = 'single';
@@ -45,6 +52,8 @@ export class VoxelEngine {
   private voxels: SimulationVoxel[] = [];
   private voxelMap: Map<string, SimulationVoxel> = new Map();
   private rebuildTargets: RebuildTarget[] = [];
+  private pendingRebuildModel: VoxelData[] | null = null;
+  private pendingRebuildCommand: VoxelDelta | null = null;
   private rebuildStartTime: number = 0;
   private dismantleStartTime: number = 0;
   
@@ -161,9 +170,19 @@ export class VoxelEngine {
       }
   }
 
-  public loadInitialModel(data: VoxelData[]) {
-    this.initialModelState = JSON.parse(JSON.stringify(data));
-    this.createVoxels(data);
+  public loadInitialModel(data: VoxelData[], skeleton: SkeletonDef | null = null) {
+    const document = createModelDocument(data, skeleton);
+    this.documentVersion = this.documentRevision + 1;
+    this.replayVersion = (this.replayVersion ?? 0) + 1;
+    this.replaySource = null;
+    this.clearEditSelection();
+    this.clearRig();
+    this.currentSkeleton = document.skeleton;
+    this.pendingRebuildModel = null;
+    this.pendingRebuildCommand = null;
+    this.rebuildTargets = [];
+    this.initialModelState = document.voxels.map(cloneVoxel);
+    this.createVoxels(document.voxels);
     this.onCountChange(this.voxels.length);
     this.state = AppState.STABLE;
     this.onStateChange(this.state);
@@ -171,8 +190,8 @@ export class VoxelEngine {
     
     this.undoStack = [];
     this.redoStack = [];
-    this.changeLog = [];
     this.voxelSnapshot = null;
+    this.onDocumentChange?.(this.getModelDocument());
   }
 
   public setBrushType(type: 'single' | 'sphere' | 'box') {
@@ -184,6 +203,8 @@ export class VoxelEngine {
   }
 
   public undo() {
+      if (this.state === AppState.REBUILDING || this.state === AppState.DISMANTLING) return;
+      this.deselectEditVoxel();
       if (this.undoStack.length === 0) return;
       const delta = this.undoStack.pop()!;
       this.redoStack.push(delta);
@@ -191,6 +212,8 @@ export class VoxelEngine {
   }
 
   public redo() {
+      if (this.state === AppState.REBUILDING || this.state === AppState.DISMANTLING) return;
+      this.deselectEditVoxel();
       if (this.redoStack.length === 0) return;
       const delta = this.redoStack.pop()!;
       this.undoStack.push(delta);
@@ -198,65 +221,66 @@ export class VoxelEngine {
   }
 
   private applyDelta(delta: VoxelDelta, isUndo: boolean) {
-      const action = delta.action;
-      
-      delta.voxels.forEach(v => {
-          if (action === 'add') {
-              if (isUndo) this.deleteVoxelAt(v.x, v.y, v.z);
-              else this.addVoxelAt(v.x, v.y, v.z, new THREE.Color(v.newColor));
-          } else if (action === 'delete') {
-              if (isUndo) this.addVoxelAt(v.x, v.y, v.z, new THREE.Color(v.oldColor));
-              else this.deleteVoxelAt(v.x, v.y, v.z);
-          } else if (action === 'paint') {
-              const color = isUndo ? v.oldColor : v.newColor;
-              this.paintVoxelAt(v.x, v.y, v.z, new THREE.Color(color));
-          } else if (action === 'move') {
-              const pos = isUndo ? v.oldPos : v.newPos;
-              const targetVoxel = this.voxels.find(vox =>
-                  Math.round(vox.x) === (isUndo ? v.newPos!.x : v.oldPos!.x) &&
-                  Math.round(vox.y) === (isUndo ? v.newPos!.y : v.oldPos!.y) &&
-                  Math.round(vox.z) === (isUndo ? v.newPos!.z : v.oldPos!.z)
-              );
-              if (targetVoxel && pos) {
-                  targetVoxel.x = pos.x;
-                  targetVoxel.y = pos.y;
-                  targetVoxel.z = pos.z;
-              }
-          } else if (action === 'lock') {
-              const vox = this.voxelMap.get(`${v.x},${v.y},${v.z}`);
-              if (vox) {
-                  const restoreLocked = isUndo ? v.wasLocked : !v.wasLocked;
-                  vox.isLocked = restoreLocked;
-                  if (restoreLocked) vox.color.offsetHSL(0, 0, -0.2);
-                  else if (vox.originalColor) vox.color.copy(vox.originalColor);
-              }
-          }
-      });
-
-      this.rebuildInstancedMesh();
+      this.cancelReplay();
+      this.documentVersion = this.documentRevision + 1;
+      const updated = applyVoxelCommand(this.getVoxelDataForSave(), delta, isUndo);
+      this.clearRig();
+      this.createVoxels(updated);
+      this.applyDisplayState();
       this.onCountChange(this.voxels.length);
+      this.onDocumentChange?.(this.getModelDocument());
+  }
+
+  public editVoxels(edit: VoxelEdit) {
+      if (this.state === AppState.REBUILDING || this.state === AppState.DISMANTLING) return;
+      const command = createVoxelEdit(this.getVoxelDataForSave(), edit);
+      if (command.voxels.length === 0) return;
+      this.applyDelta(command, false);
+      this.commitChange(command);
   }
 
   private commitChange(delta: VoxelDelta) {
-      this.undoStack.push(delta);
+      this.undoStack.push(structuredClone(delta));
       this.redoStack = []; 
-      this.changeLog.push({
-          timestamp: performance.now(),
-          delta: JSON.parse(JSON.stringify(delta))
-      });
+      this.onDocumentChange?.(this.getModelDocument());
   }
 
   public async playTimeLapse() {
-      if (this.changeLog.length === 0) return;
-      this.createVoxels(JSON.parse(JSON.stringify(this.initialModelState)));
-      this.onCountChange(this.voxels.length);
-      for (const entry of this.changeLog) {
+      if (this.undoStack.length === 0 || this.state !== AppState.STABLE || this.replaySource) return;
+      const commands = structuredClone(this.undoStack);
+      const source = this.getVoxelDataForSave();
+      const generation = this.replayVersion = (this.replayVersion ?? 0) + 1;
+      this.replaySource = source;
+      let preview = structuredClone(this.initialModelState);
+      this.createVoxels(preview);
+      try {
+        for (const command of commands) {
           await new Promise(resolve => setTimeout(resolve, 50));
-          this.applyDelta(entry.delta, false);
+          if (generation !== this.replayVersion) return;
+          preview = applyVoxelCommand(preview, command);
+          this.createVoxels(preview);
+          this.applyDisplayState();
+        }
+      } finally {
+        if (generation === this.replayVersion) {
+          this.replaySource = null;
+          this.createVoxels(source);
+          this.applyDisplayState();
+        }
       }
   }
 
+  private cancelReplay() {
+    if (!this.replaySource) return;
+    const source = this.replaySource;
+    this.replaySource = null;
+    this.replayVersion++;
+    this.createVoxels(source);
+    this.applyDisplayState();
+  }
+
   public async voxelizeImage(imageFile: File) {
+      const version = this.documentRevision;
       const img = new Image();
       const reader = new FileReader();
       await new Promise((resolve, reject) => {
@@ -265,8 +289,10 @@ export class VoxelEngine {
               img.onload = resolve;
               img.onerror = reject;
           };
+          reader.onerror = () => reject(new Error('The image file could not be read.'));
           reader.readAsDataURL(imageFile);
       });
+      if(this.documentRevision!==version)throw new Error('Image import cancelled because the active model changed.');
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -307,6 +333,7 @@ export class VoxelEngine {
   }
 
   public voxelizeText(text: string, fontSize: number = 32, color: number = 0x3b82f6) {
+      if(text.length>256)throw new Error('Text generation supports up to 256 characters.');
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -368,6 +395,7 @@ export class VoxelEngine {
       };
 
       const voxelMap = new Map<string, number>();
+      let cellTests = 0;
       const tmpN = new THREE.Vector3();
       const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
       const tri = new THREE.Triangle();
@@ -459,6 +487,7 @@ export class VoxelEngine {
               for (let ix=ixMin; ix<=ixMax; ix++) {
                   for (let iy=iyMin; iy<=iyMax; iy++) {
                       for (let iz=izMin; iz<=izMax; iz++) {
+                          if(++cellTests>50000000)throw new Error('Mesh conversion exceeded its work budget. Use a simpler mesh or lower resolution.');
                           const vcx=box.min.x+(ix+0.5)*voxelWorldSize;
                           const vcy=box.min.y+(iy+0.5)*voxelWorldSize;
                           const vcz=box.min.z+(iz+0.5)*voxelWorldSize;
@@ -467,6 +496,7 @@ export class VoxelEngine {
                           if (tri.intersectsBox(voxelBox)) {
                               const key = `${ix},${iy},${iz}`;
                               if (!voxelMap.has(key)) voxelMap.set(key, color);
+                              if(voxelMap.size>250000)throw new Error('Mesh conversion exceeds 250,000 voxels. Use a lower resolution.');
                           }
                       }
                   }
@@ -488,14 +518,14 @@ export class VoxelEngine {
   public resample(scaleFactor: number) {
       if (this.voxels.length === 0) return;
       const newVoxelsMap = new Map<string, VoxelData>();
-      this.voxels.forEach(v => {
+      this.getVoxelDataForSave().forEach(v => {
           const rx = Math.round(v.x * scaleFactor), ry = Math.round(v.y * scaleFactor), rz = Math.round(v.z * scaleFactor);
           const key = `${rx},${ry},${rz}`;
           if (!newVoxelsMap.has(key)) {
-              newVoxelsMap.set(key, { x: rx, y: ry, z: rz, color: v.color.getHex() });
+              newVoxelsMap.set(key, { ...v, x: rx, y: ry, z: rz });
           }
       });
-      this.loadInitialModel(Array.from(newVoxelsMap.values()));
+      this.transformModel(Array.from(newVoxelsMap.values()));
   }
 
   private getAllMeshes(): THREE.InstancedMesh[] {
@@ -503,15 +533,10 @@ export class VoxelEngine {
   }
 
   private createVoxels(data: VoxelData[]) {
-    const dedupeMap = new Map<string, VoxelData>();
-    for (const v of data) {
-        const rx = Math.round(v.x), ry = Math.round(v.y), rz = Math.round(v.z);
-        dedupeMap.set(`${rx},${ry},${rz}`, { ...v, x: rx, y: ry, z: rz });
-    }
-    this.voxels = Array.from(dedupeMap.values()).map((v, i) => {
+    this.voxels = normalizeVoxels(data).map((v, i) => {
         const c = new THREE.Color(v.color);
         return {
-            id: i, x: v.x, y: v.y, z: v.z, color: c, originalColor: c.clone(),
+            id: i, x: v.x, y: v.y, z: v.z, color: v.isLocked ? c.clone().offsetHSL(0, 0, -0.2) : c.clone(), originalColor: c,
             materialType: v.materialType || VoxelMaterial.STANDARD,
             isLocked: !!v.isLocked, bone: v.bone, weights: v.weights || [],
             vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, rvx: 0, rvy: 0, rvz: 0, scale: 1
@@ -522,7 +547,7 @@ export class VoxelEngine {
 
   private initMaterialMeshes() {
       this.getAllMeshes().forEach(mesh => {
-          if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }
+          if (mesh) { this.scene.remove(mesh); mesh.dispose(); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }
       });
       const geometry = new THREE.BoxGeometry(CONFIG.VOXEL_SIZE - 0.05, CONFIG.VOXEL_SIZE - 0.05, CONFIG.VOXEL_SIZE - 0.05);
       
@@ -553,7 +578,7 @@ export class VoxelEngine {
           if (!mesh) return;
           const idx = counts[matType]++;
           
-          if (idx >= mesh.count) return;
+          if (idx >= mesh.instanceMatrix.count) return;
 
           this.dummy.position.set(v.x, v.y, v.z);
           this.dummy.rotation.set(v.rx, v.ry, v.rz);
@@ -575,8 +600,8 @@ export class VoxelEngine {
   }
 
   private rebuildInstancedMesh() {
-      const currentBufferCount = (this.standardMesh as any)?._maxInstanceCount || 0;
-      if (this.voxels.length >= currentBufferCount) {
+      const currentBufferCount = this.standardMesh?.instanceMatrix.count ?? 0;
+      if (!this.standardMesh || this.voxels.length > currentBufferCount) {
           this.initMaterialMeshes();
       }
 
@@ -586,24 +611,14 @@ export class VoxelEngine {
           this.voxelMap.set(`${Math.round(v.x)},${Math.round(v.y)},${Math.round(v.z)}`, v);
       });
       this.draw();
+      this.getAllMeshes().forEach(mesh => { mesh.boundingSphere = null; });
   }
 
   public mergeAIGeneratedModel(newData: VoxelData[]) {
-      const merged: VoxelData[] = [];
-      this.voxels.forEach(v => { 
-          if (v.isLocked) merged.push({ 
-              x: v.x, y: v.y, z: v.z, 
-              color: v.originalColor?.getHex() || v.color.getHex(), 
-              materialType: v.materialType, 
-              isLocked: true 
-          }); 
-      });
-      newData.forEach(nv => { 
-          if (!merged.some(mv => Math.round(mv.x) === Math.round(nv.x) && Math.round(mv.y) === Math.round(nv.y) && Math.round(mv.z) === Math.round(nv.z))) {
-              merged.push(nv); 
-          }
-      });
-      this.rebuild(merged);
+      const locked = this.getVoxelDataForSave().filter(v => v.isLocked);
+      const preserved = new Set(locked.map(v => `${v.x},${v.y},${v.z}`));
+      const generated = normalizeVoxels(newData).filter(v => !preserved.has(`${v.x},${v.y},${v.z}`));
+      this.rebuild([...locked, ...generated]);
   }
 
   public explodeFromRig(preserveSnapshot = false) {
@@ -633,6 +648,7 @@ export class VoxelEngine {
   }
 
   public dismantle(preserveSnapshot = false) {
+    this.cancelReplay();
     if (this.state !== AppState.STABLE) return;
     if (!preserveSnapshot) this.createSnapshot();
 
@@ -647,21 +663,14 @@ export class VoxelEngine {
   }
 
   private createSnapshot() {
-      this.voxelSnapshot = this.voxels.map(v => ({
-          x: v.x, y: v.y, z: v.z,
-          color: v.originalColor?.getHex() || v.color.getHex(),
-          materialType: v.materialType,
-          isLocked: v.isLocked,
-          bone: v.bone,
-          weights: JSON.parse(JSON.stringify(v.weights))
-      }));
+      this.voxelSnapshot = this.getVoxelDataForSave();
   }
 
   public restoreFromSnapshot() {
       if (!this.voxelSnapshot) return;
       const skeleton = this.currentSkeleton;
       const snapshotData = this.voxelSnapshot;
-      this.loadInitialModel(snapshotData);
+      this.loadInitialModel(snapshotData, skeleton);
       if (skeleton) {
           this.state = AppState.RIGGING;
           this.onStateChange(this.state);
@@ -674,16 +683,21 @@ export class VoxelEngine {
   }
 
   public rebuild(targetModel: VoxelData[]) {
+    this.cancelReplay();
     if (this.state === AppState.REBUILDING) return;
-    
-    if (targetModel.length >= (this.standardMesh?.count || 0)) {
-        this.initMaterialMeshes();
-    }
+    const target = normalizeVoxels(targetModel);
+    const before = this.state === AppState.DISMANTLING && this.voxelSnapshot
+      ? this.voxelSnapshot.map(cloneVoxel) : this.getVoxelDataForSave();
+    this.pendingRebuildModel = target;
+    this.pendingRebuildCommand = replaceModelCommand(before, target);
+    this.clearRig();
+    this.disposeSolidPreview();
+    this.getAllMeshes().forEach(mesh => { mesh.visible = true; });
 
     const available = this.voxels.map((v, i) => ({ index: i, color: v.color, taken: false }));
     const mappings: RebuildTarget[] = new Array(this.voxels.length).fill(null);
     
-    targetModel.forEach(target => {
+    target.forEach(target => {
         let bestDist = 9999, bestIdx = -1;
         for (let i = 0; i < available.length; i++) {
             if (available[i].taken) continue;
@@ -718,6 +732,7 @@ export class VoxelEngine {
     this.rebuildStartTime = Date.now(); 
     this.state = AppState.REBUILDING; 
     this.onStateChange(this.state);
+    this.rebuildInstancedMesh();
     this.onCountChange(this.voxels.length);
   }
 
@@ -734,19 +749,28 @@ export class VoxelEngine {
         this.voxels.forEach((v, i) => {
             const t = this.rebuildTargets[i]; if (!t || elapsed < t.delay) { if (t) allDone = false; return; }
             const speed = 0.12; v.x += (t.x - v.x)*speed; v.y += (t.y - v.y)*speed; v.z += (t.z - v.z)*speed; v.rx *= 0.9; v.ry *= 0.9; v.rz *= 0.9;
-            if (Math.abs(v.x-t.x) > 0.01) allDone = false;
+            if (Math.max(Math.abs(v.x-t.x), Math.abs(v.y-t.y), Math.abs(v.z-t.z)) > 0.01) allDone = false;
             else { v.x = t.x; v.y = t.y; v.z = t.z; v.rx = 0; v.ry = 0; v.rz = 0; if (t.color !== undefined) { v.color.set(t.color); v.originalColor = v.color.clone(); } }
         });
         if (allDone) { 
+            const model = this.pendingRebuildModel;
+            const command = this.pendingRebuildCommand;
+            this.pendingRebuildModel = null;
+            this.pendingRebuildCommand = null;
+            this.rebuildTargets = [];
+            if (model) this.createVoxels(model);
+            if (command) this.commitChange(command);
             this.state = AppState.STABLE; 
             this.onStateChange(this.state); 
-            this.rebuildInstancedMesh();
+            this.onCountChange(this.voxels.length);
+            this.applyDisplayState();
         }
     }
   }
 
   private animate() {
     this.animationId = requestAnimationFrame(this.animate);
+    if (!this.active) return;
     const delta = this.clock.getDelta(); if (this.mixer) this.mixer.update(delta);
     this.controls.update(); this.updatePhysics();
     this.draw();
@@ -911,6 +935,7 @@ export class VoxelEngine {
 
   private refreshSolidPreview() {
       if (this.solidPreviewMesh) { this.scene.remove(this.solidPreviewMesh); this.solidPreviewMesh.geometry.dispose(); (this.solidPreviewMesh.material as THREE.Material).dispose(); this.solidPreviewMesh = null; }
+      if (this.voxels.length === 0) return;
       const mesh = this.generateOptimizedMesh();
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -934,18 +959,30 @@ export class VoxelEngine {
   public setAutoRotate(enabled: boolean) { if (this.controls) this.controls.autoRotate = enabled; }
 
   public getVoxelDataForSave(): VoxelData[] {
+      if (this.replaySource) return this.replaySource.map(cloneVoxel);
+      if (this.state === AppState.REBUILDING && this.pendingRebuildModel) return this.pendingRebuildModel.map(cloneVoxel);
+      if (this.state === AppState.DISMANTLING && this.voxelSnapshot) return this.voxelSnapshot.map(cloneVoxel);
       return this.voxels.map(v => ({
           x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z),
           color: (v.originalColor || v.color).getHex(),
           ...(v.materialType !== VoxelMaterial.STANDARD && { materialType: v.materialType }),
           ...(v.bone && { bone: v.bone }),
-          ...(v.weights && v.weights.length > 0 && { weights: v.weights }),
+          ...(v.weights && v.weights.length > 0 && { weights: v.weights.map(w => ({ ...w })) }),
           ...(v.isLocked && { isLocked: true }),
       }));
   }
 
   public getJsonData(): string {
-      return JSON.stringify(this.voxels.map((v, i) => ({ id: i, x: +v.x.toFixed(2), y: +v.y.toFixed(2), z: +v.z.toFixed(2), c: '#' + v.color.getHexString() })), null, 2);
+      return serializeModelDocument(this.getModelDocument());
+  }
+
+  public getModelDocument(): ModelDocument {
+      return createModelDocument(this.getVoxelDataForSave(), this.currentSkeleton);
+  }
+
+  public importJsonData(json: string) {
+      const document = parseModelDocument(json);
+      this.loadInitialModel(document.voxels, document.skeleton);
   }
   
   public getUniqueColors(): string[] {
@@ -1017,12 +1054,13 @@ export class VoxelEngine {
     }
     exportGroup.userData.voxelData = this.voxels.map(v => ({
         x: Math.round(v.x), y: Math.round(v.y), z: Math.round(v.z),
-        c: '#' + v.color.getHexString(),
+        c: '#' + (v.originalColor || v.color).getHexString(),
         ...(v.materialType !== VoxelMaterial.STANDARD && { m: v.materialType }),
         ...(v.bone && { b: v.bone }),
         ...(v.weights && v.weights.length > 0 && { w: v.weights }),
         ...(v.isLocked && { l: true })
     }));
+    exportGroup.userData.voxshopSkeleton = cloneSkeleton(this.currentSkeleton);
     exporter.parse(exportGroup, (gltf) => {
         const blob = new Blob([gltf as ArrayBuffer], { type: 'application/octet-stream' });
         const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'voxel_model.glb'; link.click();
@@ -1156,6 +1194,7 @@ export class VoxelEngine {
   private onPointerUp() { this.isPainting = false; }
 
   private paintVoxel(event: PointerEvent) {
+    this.cancelReplay();
     const allMeshes = this.getAllMeshes(); if (allMeshes.length === 0) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1168,8 +1207,10 @@ export class VoxelEngine {
             targetMesh.getMatrixAt(instanceId, hitMatrix); hitPos.setFromMatrixPosition(hitMatrix);
             const voxel = this.voxelMap.get(`${Math.round(hitPos.x)},${Math.round(hitPos.y)},${Math.round(hitPos.z)}`);
             if (voxel) {
+                this.documentVersion = this.documentRevision + 1;
                 voxel.bone = this.currentPaintBone!;
                 voxel.weights = [{ bone: this.currentPaintBone!, weight: 1.0 }];
+                this.onDocumentChange?.(this.getModelDocument());
                 const mixedColor = (voxel.originalColor || voxel.color).clone().lerp(this.currentPaintColor, 0.6);
                 voxel.color.copy(mixedColor);
                 targetMesh.setColorAt(instanceId, voxel.color); if (targetMesh.instanceColor) targetMesh.instanceColor.needsUpdate = true;
@@ -1188,19 +1229,35 @@ export class VoxelEngine {
   public setSymmetry(x: boolean, y: boolean, z: boolean) { this.symmetryX = x; this.symmetryY = y; this.symmetryZ = z; }
   public setEditMaterial(material: VoxelMaterial) { this.currentEditMaterial = material; }
 
+  private clearEditSelection() {
+      if (this.editMesh) {
+          this.scene.remove(this.editMesh);
+          this.editMesh.geometry.dispose();
+          (this.editMesh.material as THREE.Material).dispose();
+      }
+      this.transformControl?.detach();
+      this.editMesh = null;
+      this.editInstanceId = null;
+      this.editInstanceType = null;
+  }
+
   private deselectEditVoxel() {
-      if (this.editMesh && this.editInstanceId !== null && this.editInstanceType !== null) {
-          const targetMesh = this.getMeshForMaterial(this.editInstanceType); if (!targetMesh) return;
-          const hitPos = new THREE.Vector3(), hitMatrix = new THREE.Matrix4();
-          targetMesh.getMatrixAt(this.editInstanceId, hitMatrix); hitPos.setFromMatrixPosition(hitMatrix);
-          const voxel = this.voxelMap.get(`${Math.round(hitPos.x)},${Math.round(hitPos.y)},${Math.round(hitPos.z)}`);
-          if (voxel) {
-              const oldPos = { x: voxel.x, y: voxel.y, z: voxel.z };
-              const newPos = { x: Math.round(this.editMesh.position.x), y: Math.round(this.editMesh.position.y), z: Math.round(this.editMesh.position.z) };
-              if (oldPos.x !== newPos.x || oldPos.y !== newPos.y || oldPos.z !== newPos.z) this.commitChange({ action: 'move', voxels: [{ x: oldPos.x, y: oldPos.y, z: oldPos.z, oldPos, newPos }] });
-              voxel.x = newPos.x; voxel.y = newPos.y; voxel.z = newPos.z;
-          }
-          this.scene.remove(this.editMesh); this.transformControl.detach(); this.editMesh = null; this.editInstanceId = null; this.editInstanceType = null; this.rebuildInstancedMesh();
+      if (!this.editMesh || this.editInstanceId === null || this.editInstanceType === null) return;
+      const mesh = this.getMeshForMaterial(this.editInstanceType);
+      if (!mesh) { this.clearEditSelection(); return; }
+      const matrix = new THREE.Matrix4();
+      mesh.getMatrixAt(this.editInstanceId, matrix);
+      const from = new THREE.Vector3().setFromMatrixPosition(matrix);
+      const to = {
+          x: Math.round(this.editMesh.position.x),
+          y: Math.round(this.editMesh.position.y),
+          z: Math.round(this.editMesh.position.z),
+      };
+      const command = createMoveCommand(this.getVoxelDataForSave(), from, to);
+      this.clearEditSelection();
+      if (command.voxels.length > 0) {
+          this.applyDelta(command, false);
+          this.commitChange(command);
       }
   }
 
@@ -1215,119 +1272,73 @@ export class VoxelEngine {
       return positions;
   }
 
-  private paintVoxelAt(x: number, y: number, z: number, color: THREE.Color) {
-      const voxel = this.voxels.find(v => Math.round(v.x) === Math.round(x) && Math.round(v.y) === Math.round(y) && Math.round(v.z) === Math.round(z));
-      if (voxel) { voxel.color.copy(color); voxel.originalColor = color.clone(); }
-  }
-
-  private addVoxelAt(x: number, y: number, z: number, color: THREE.Color) {
-      if (!this.voxels.some(v => Math.round(v.x) === Math.round(x) && Math.round(v.y) === Math.round(y) && Math.round(v.z) === Math.round(z))) {
-          this.voxels.push({ id: this.voxels.length, x: Math.round(x), y: Math.round(y), z: Math.round(z), color: color.clone(), originalColor: color.clone(), weights: [], materialType: this.currentEditMaterial, isLocked: false, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, rvx: 0, rvy: 0, rvz: 0, scale: 1 });
+  private getBrushTargets(base: { x: number; y: number; z: number }, normal?: THREE.Vector3) {
+      const result: { position: THREE.Vector3; normal?: THREE.Vector3 }[] = [];
+      for (const point of this.getVoxelPositionsInBrush(base.x, base.y, base.z)) {
+          const targets = [{ position: new THREE.Vector3(point.x, point.y, point.z), normal: normal?.clone() }];
+          for (const axis of ['x', 'y', 'z'] as const) {
+              if (!(axis === 'x' ? this.symmetryX : axis === 'y' ? this.symmetryY : this.symmetryZ)) continue;
+              for (const target of [...targets]) {
+                  const mirrored = { position: target.position.clone(), normal: target.normal?.clone() };
+                  mirrored.position[axis] *= -1;
+                  if (mirrored.normal) mirrored.normal[axis] *= -1;
+                  targets.push(mirrored);
+              }
+          }
+          result.push(...targets);
       }
-  }
-
-  private deleteVoxelAt(x: number, y: number, z: number) {
-      const idx = this.voxels.findIndex(v => Math.round(v.x) === Math.round(x) && Math.round(v.y) === Math.round(y) && Math.round(v.z) === Math.round(z));
-      if (idx !== -1) this.voxels.splice(idx, 1);
+      return result;
   }
 
   private handleEditClick(event: PointerEvent) {
-      const allMeshes = this.getAllMeshes(); if (allMeshes.length === 0) return;
       const rect = this.renderer.domElement.getBoundingClientRect();
-      this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       this.raycaster.setFromCamera(this.mouse, this.camera);
       if (this.transformControl.dragging || this.transformControl.axis !== null) return;
-      const intersects = this.raycaster.intersectObjects(allMeshes);
-      if (intersects.length > 0) {
-          const intersect = intersects[0]; const instanceId = intersect.instanceId; const targetMesh = intersect.object as THREE.InstancedMesh;
-          if (instanceId === undefined) return;
-          const hitPos = new THREE.Vector3(), hitMatrix = new THREE.Matrix4();
-          targetMesh.getMatrixAt(instanceId, hitMatrix); hitPos.setFromMatrixPosition(hitMatrix);
-          const baseVoxel = this.voxelMap.get(`${Math.round(hitPos.x)},${Math.round(hitPos.y)},${Math.round(hitPos.z)}`);
-          if (!baseVoxel) return;
-          if (this.editMode === 'move') {
-              if (baseVoxel.isLocked) return;
-              this.deselectEditVoxel(); this.editInstanceId = intersect.instanceId!; this.editInstanceType = baseVoxel.materialType;
-              this.editMesh = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), (targetMesh.material as THREE.Material).clone());
-              this.editMesh.position.copy(hitPos); this.scene.add(this.editMesh); this.transformControl.attach(this.editMesh);
-              return;
-          }
-          const brushPos = this.getVoxelPositionsInBrush(baseVoxel.x, baseVoxel.y, baseVoxel.z);
-          const finalTargets: { pos: { x: number, y: number, z: number }, norm?: THREE.Vector3 }[] = [];
-          brushPos.forEach(bp => {
-              const targets = [new THREE.Vector3(bp.x, bp.y, bp.z)], faceNormal = intersect.face?.normal;
-              const normals: (THREE.Vector3 | undefined)[] = faceNormal ? [faceNormal.clone()] : [undefined];
-              if (this.symmetryX) { const c = targets.length; for (let i = 0; i < c; i++) { targets.push(new THREE.Vector3(-targets[i].x, targets[i].y, targets[i].z)); if (faceNormal) normals.push(new THREE.Vector3(-normals[i]!.x, normals[i]!.y, normals[i]!.z)); else normals.push(undefined); } }
-              if (this.symmetryY) { const c = targets.length; for (let i = 0; i < c; i++) { targets.push(new THREE.Vector3(targets[i].x, -targets[i].y, targets[i].z)); if (faceNormal) normals.push(new THREE.Vector3(normals[i]?.x||0, -(normals[i]?.y||0), normals[i]?.z||0)); else normals.push(undefined); } }
-              if (this.symmetryZ) { const c = targets.length; for (let i = 0; i < c; i++) { targets.push(new THREE.Vector3(targets[i].x, targets[i].y, -targets[i].z)); if (faceNormal) normals.push(new THREE.Vector3(normals[i]?.x||0, normals[i]?.y||0, -(normals[i]?.z||0))); else normals.push(undefined); } }
-              targets.forEach((t, i) => finalTargets.push({ pos: { x: t.x, y: t.y, z: t.z }, norm: normals[i] }));
-          });
-          const delta: VoxelDelta = { action: this.editMode as any, voxels: [] };
-          if (this.editMode === 'paint' && this.currentEditColor) {
-              const newColor = new THREE.Color(this.currentEditColor);
-              finalTargets.forEach(t => {
-                  const v = this.voxelMap.get(`${Math.round(t.pos.x)},${Math.round(t.pos.y)},${Math.round(t.pos.z)}`);
-                  if (v && !v.isLocked) { delta.voxels.push({ x: v.x, y: v.y, z: v.z, oldColor: v.color.getHex(), newColor: newColor.getHex() }); v.color.copy(newColor); v.materialType = this.currentEditMaterial; }
-              });
-          } else if (this.editMode === 'delete') {
-              finalTargets.forEach(t => {
-                  const v = this.voxelMap.get(`${Math.round(t.pos.x)},${Math.round(t.pos.y)},${Math.round(t.pos.z)}`);
-                  if (v && !v.isLocked) { delta.voxels.push({ x: v.x, y: v.y, z: v.z, oldColor: v.color.getHex() }); const idx = this.voxels.indexOf(v); if (idx !== -1) this.voxels.splice(idx, 1); }
-              });
-          } else if (this.editMode === 'add' && this.currentEditColor) {
-              const newColor = new THREE.Color(this.currentEditColor);
-              finalTargets.forEach(t => {
-                  if (!t.norm) return;
-                  const nx = Math.round(t.pos.x + t.norm.x * CONFIG.VOXEL_SIZE), ny = Math.round(t.pos.y + t.norm.y * CONFIG.VOXEL_SIZE), nz = Math.round(t.pos.z + t.norm.z * CONFIG.VOXEL_SIZE);
-                  if (!this.voxelMap.has(`${nx},${ny},${nz}`)) {
-                      delta.voxels.push({ x: nx, y: ny, z: nz, newColor: newColor.getHex() });
-                      this.voxels.push({ id: this.voxels.length, x: nx, y: ny, z: nz, color: newColor.clone(), originalColor: newColor.clone(), weights: [], materialType: this.currentEditMaterial, isLocked: false, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, rvx: 0, rvy: 0, rvz: 0, scale: 1 });
-                  }
-              });
-          } else if (this.editMode === 'lock') {
-              finalTargets.forEach(t => {
-                  const v = this.voxelMap.get(`${Math.round(t.pos.x)},${Math.round(t.pos.y)},${Math.round(t.pos.z)}`);
-                  if (v) {
-                      delta.voxels.push({ x: Math.round(t.pos.x), y: Math.round(t.pos.y), z: Math.round(t.pos.z), wasLocked: v.isLocked });
-                      v.isLocked = !v.isLocked;
-                      if (v.isLocked) v.color.offsetHSL(0, 0, -0.2);
-                      else if (v.originalColor) v.color.copy(v.originalColor);
-                  }
-              });
-              if (delta.voxels.length > 0) this.commitChange(delta);
-              this.rebuildInstancedMesh();
-          } else if (this.editMode === 'fill' && this.currentEditColor) {
-              this.floodFill(baseVoxel.x, baseVoxel.y, baseVoxel.z, delta);
-          }
-          if (delta.voxels.length > 0) { this.commitChange(delta); this.rebuildInstancedMesh(); this.onCountChange(this.voxels.length); }
-      } else if (this.editMode === 'move') this.deselectEditVoxel();
-  }
-
-  private floodFill(startX: number, startY: number, startZ: number, delta: VoxelDelta) {
-    if (!this.currentEditColor) return;
-    const startVoxel = this.voxelMap.get(`${startX},${startY},${startZ}`);
-    if (!startVoxel) return;
-    const targetHex = startVoxel.color.getHexString();
-    const newColor = new THREE.Color(this.currentEditColor);
-    if (newColor.getHexString() === targetHex) return;
-    const visited = new Set<string>();
-    const queue: { x: number, y: number, z: number }[] = [{ x: startX, y: startY, z: startZ }];
-    const dirs = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-    while (queue.length > 0) {
-      const { x, y, z } = queue.shift()!;
-      const key = `${x},${y},${z}`;
-      if (visited.has(key)) continue;
-      visited.add(key);
-      const v = this.voxelMap.get(key);
-      if (!v || v.color.getHexString() !== targetHex || v.isLocked) continue;
-      delta.voxels.push({ x, y, z, oldColor: v.color.getHex(), newColor: newColor.getHex() });
-      v.color.copy(newColor);
-      v.materialType = this.currentEditMaterial;
-      dirs.forEach(([dx, dy, dz]) => queue.push({ x: x+dx, y: y+dy, z: z+dz }));
-    }
+      const hit = this.raycaster.intersectObjects(this.getAllMeshes())[0];
+      if (!hit) {
+          if (this.editMode === 'add' && this.currentEditColor) {
+              const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(CONFIG.FLOOR_Y + 1));
+              const point = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+              if (point) {
+                  const base = { x: Math.round(point.x), y: CONFIG.FLOOR_Y + 1, z: Math.round(point.z) };
+                  this.editVoxels({ mode: 'add', targets: this.getBrushTargets(base).map(t => t.position),
+                      color: new THREE.Color(this.currentEditColor).getHex(), materialType: this.currentEditMaterial });
+              }
+          } else if (this.editMode === 'move') this.deselectEditVoxel();
+          return;
+      }
+      if (hit.instanceId === undefined) return;
+      const mesh = hit.object as THREE.InstancedMesh;
+      const matrix = new THREE.Matrix4();
+      mesh.getMatrixAt(hit.instanceId, matrix);
+      const point = new THREE.Vector3().setFromMatrixPosition(matrix);
+      const base = this.voxelMap.get(`${Math.round(point.x)},${Math.round(point.y)},${Math.round(point.z)}`);
+      if (!base) return;
+      if (this.editMode === 'move') {
+          if (base.isLocked) return;
+          this.deselectEditVoxel();
+          this.editInstanceId = hit.instanceId;
+          this.editInstanceType = base.materialType;
+          this.editMesh = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), (mesh.material as THREE.Material).clone());
+          this.editMesh.position.copy(point);
+          this.scene.add(this.editMesh);
+          this.transformControl.attach(this.editMesh);
+          return;
+      }
+      const targets = this.getBrushTargets(base, hit.face?.normal).flatMap(target => {
+          if (this.editMode !== 'add') return [target.position];
+          if (!target.normal) return [];
+          return [target.position.clone().addScaledVector(target.normal, CONFIG.VOXEL_SIZE).round()];
+      });
+      this.editVoxels({ mode: this.editMode, targets,
+          color: this.currentEditColor ? new THREE.Color(this.currentEditColor).getHex() : undefined,
+          materialType: this.currentEditMaterial });
   }
 
   public autoRig(skeletonDef: SkeletonDef) {
+    this.cancelReplay();
       if (this.state === AppState.DISMANTLING) this.exitRiggingMode();
 
       const box = new THREE.Box3();
@@ -1475,8 +1486,11 @@ export class VoxelEngine {
   }
 
   public buildRigAndPreview(skeletonDef: SkeletonDef) {
+    this.cancelReplay();
+    this.documentVersion = this.documentRevision + 1;
     this.clearRig();
     this.currentSkeleton = skeletonDef;
+    this.onDocumentChange?.(this.getModelDocument());
     this.rigGroup = new THREE.Group();
     this.boneGroups = {};
     this.bonePivots = {};
@@ -1542,10 +1556,11 @@ export class VoxelEngine {
   }
 
   public async exportVOX() {
-    const voxels = this.voxels; if (voxels.length === 0) return;
+    const voxels = this.getVoxelDataForSave().map(v=>({...v,color:new THREE.Color(v.color)})); if (voxels.length === 0) return;
     const box = new THREE.Box3(); voxels.forEach(v => box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z)));
     const size = new THREE.Vector3(); box.getSize(size);
     const w = Math.ceil(size.x) + 1, h = Math.ceil(size.y) + 1, d = Math.ceil(size.z) + 1;
+    if(Math.max(w,h,d)>256)throw new Error('VOX coordinates support at most 256 cells per axis. Use native JSON or a smaller model.');
     const colorMap = new Map<number, number>();
     voxels.forEach(v => { const hex = v.color.getHex(); if (!colorMap.has(hex) && colorMap.size < 255) colorMap.set(hex, colorMap.size + 1); });
     const pal = Array.from(colorMap.keys()); while (pal.length < 256) pal.push(0);
@@ -1566,11 +1581,12 @@ export class VoxelEngine {
   }
 
   public async exportQB() {
-    const voxels = this.voxels; if (voxels.length === 0) return;
+    const voxels = this.getVoxelDataForSave().map(v=>({...v,color:new THREE.Color(v.color)})); if (voxels.length === 0) return;
     const box = new THREE.Box3(); voxels.forEach(v => box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z)));
     const size = new THREE.Vector3(); box.getSize(size);
     const w = Math.ceil(size.x) + 1, h = Math.ceil(size.y) + 1, d = Math.ceil(size.z) + 1;
     const buffer: number[] = [];
+    if(w*h*d>4000000)throw new Error('QB export exceeds four million volume cells. Use native JSON or a smaller model.');
     const writeInt = (i: number) => { const b = new ArrayBuffer(4); new DataView(b).setUint32(0, i, true); new Uint8Array(b).forEach(v => buffer.push(v)); };
     
     writeInt(0x01010000);
@@ -1595,11 +1611,12 @@ export class VoxelEngine {
   }
 
   public async exportMinecraft(format: 'nbt' | 'schematic' | 'litematic') {
-    const voxels = this.voxels; if (voxels.length === 0) return;
+    const voxels = this.getVoxelDataForSave().map(v=>({...v,color:new THREE.Color(v.color)})); if (voxels.length === 0) return;
     const box = new THREE.Box3(); voxels.forEach(v => box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z)));
     const size = new THREE.Vector3(); box.getSize(size);
     const w = Math.ceil(size.x) + 1, h = Math.ceil(size.y) + 1, d = Math.ceil(size.z) + 1;
 
+    if(w*h*d>4000000)throw new Error('Minecraft export exceeds four million volume cells. Use native JSON or a smaller model.');
     const PALETTE: { rgb: [number,number,number]; id: number; data: number; name: string }[] = [
       { rgb:[207,213,214], id:251, data:0,  name:'minecraft:white_concrete' },
       { rgb:[224, 97,  0], id:251, data:1,  name:'minecraft:orange_concrete' },
@@ -1807,7 +1824,7 @@ export class VoxelEngine {
     };
     walkChunks(8, buffer.byteLength);
     if (rawVoxels.length === 0) return [];
-    const voxels = rawVoxels.map(v => ({ x: v.x, y: v.z, z: v.y, color: palette[v.ci] || 0xCCCCCC }));
+    const voxels = rawVoxels.map(v => ({ x: v.x, y: v.z, z: v.y, color: palette[v.ci] ?? 0xCCCCCC }));
     const minX = Math.min(...voxels.map(v=>v.x)), maxX = Math.max(...voxels.map(v=>v.x));
     const minZ = Math.min(...voxels.map(v=>v.z)), maxZ = Math.max(...voxels.map(v=>v.z));
     const minY = Math.min(...voxels.map(v=>v.y));
@@ -1887,28 +1904,33 @@ export class VoxelEngine {
   }
 
   public flipModel(axis: 'x' | 'y' | 'z') {
-    const data: VoxelData[] = this.voxels.map(v => ({
+    const data: VoxelData[] = this.getVoxelDataForSave().map(v => ({
+      ...v,
       x: axis === 'x' ? -Math.round(v.x) : Math.round(v.x),
       y: axis === 'y' ? -Math.round(v.y) : Math.round(v.y),
       z: axis === 'z' ? -Math.round(v.z) : Math.round(v.z),
-      color: v.color.getHex(),
-      bone: v.bone, weights: v.weights, materialType: v.materialType, isLocked: v.isLocked,
     }));
-    this.loadInitialModel(data);
+    this.transformModel(data);
   }
 
   public rotateModel90(direction: 'cw' | 'ccw') {
-    const data: VoxelData[] = this.voxels.map(v => {
+    const data: VoxelData[] = this.getVoxelDataForSave().map(v => {
       const x = Math.round(v.x), z = Math.round(v.z);
       return {
+        ...v,
         x: direction === 'cw' ? z : -z,
         y: Math.round(v.y),
         z: direction === 'cw' ? -x : x,
-        color: v.color.getHex(),
-        bone: v.bone, weights: v.weights, materialType: v.materialType, isLocked: v.isLocked,
       };
     });
-    this.loadInitialModel(data);
+    this.transformModel(data);
+  }
+
+  private transformModel(data: VoxelData[]) {
+    this.deselectEditVoxel();
+    const command = replaceModelCommand(this.getVoxelDataForSave(), normalizeVoxels(data), 'transform');
+    this.applyDelta(command, false);
+    this.commitChange(command);
   }
 
   public async importMinecraft(buffer: ArrayBuffer): Promise<VoxelData[]> {
@@ -2145,7 +2167,21 @@ export class VoxelEngine {
 
   private clearRig() {
     if (this.mixer) { this.mixer.stopAllAction(); this.mixer = null; this.currentAction = null; }
-    if (this.rigGroup) { this.scene.remove(this.rigGroup); this.rigGroup = null; this.boneGroups = {}; this.bonePivots = {}; this.rigSkeleton = null; }
+    if (this.rigGroup) {
+      this.scene.remove(this.rigGroup);
+      this.rigGroup.traverse(object => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach(material => material.dispose());
+        }
+      });
+      this.rigSkeleton?.dispose();
+      this.rigGroup = null;
+      this.boneGroups = {};
+      this.bonePivots = {};
+      this.rigSkeleton = null;
+    }
   }
 
   public exitAnimationPreview() {
@@ -2215,7 +2251,7 @@ export class VoxelEngine {
   public removeFromScene(id: string): void {
     const meshes = this.sceneObjectMeshes.get(id);
     if (meshes) {
-      meshes.forEach(m => { this.scene.remove(m); m.geometry.dispose(); (m.material as THREE.Material).dispose(); });
+      meshes.forEach(m => { this.scene.remove(m); m.dispose(); m.geometry.dispose(); (m.material as THREE.Material).dispose(); });
       this.sceneObjectMeshes.delete(id);
     }
   }
@@ -2225,5 +2261,34 @@ export class VoxelEngine {
     ids.forEach(id => this.removeFromScene(id));
   }
 
-  public cleanup() { cancelAnimationFrame(this.animationId); this.container.removeChild(this.renderer.domElement); this.renderer.dispose(); }
+  public cleanup() {
+      this.documentVersion = this.documentRevision + 1;
+      this.replayVersion++;
+      this.replaySource = null;
+      cancelAnimationFrame(this.animationId);
+      this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
+      this.renderer.domElement.removeEventListener('pointermove', this.onPointerMove);
+      window.removeEventListener('pointerup', this.onPointerUp);
+      this.controls.dispose();
+      this.clearEditSelection();
+      this.transformControl.dispose();
+      this.clearRig();
+      this.composer.passes.forEach(pass => pass.dispose());
+      this.composer.dispose();
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      this.scene.traverse(object => {
+          const renderable = object as THREE.Mesh;
+          if (object instanceof THREE.InstancedMesh) object.dispose();
+          if (renderable.geometry) geometries.add(renderable.geometry);
+          if (renderable.material) {
+              (Array.isArray(renderable.material) ? renderable.material : [renderable.material]).forEach(material => materials.add(material));
+          }
+          if (object instanceof THREE.DirectionalLight || object instanceof THREE.PointLight || object instanceof THREE.SpotLight) object.shadow.dispose();
+      });
+      geometries.forEach(geometry => geometry.dispose());
+      materials.forEach(material => material.dispose());
+      this.renderer.domElement.remove();
+      this.renderer.dispose();
+  }
 }

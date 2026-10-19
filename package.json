@@ -1,34 +1,49 @@
 {
   "name": "voxshop",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"node server.js\" \"vite\"",
-    "build": "vite build",
+    "dev": "concurrently -k \"tsx watch server/main.ts\" \"vite\"",
+    "build": "vite build && esbuild runtime/standalone.ts --bundle --platform=browser --format=iife --minify --outfile=dist/runtime.js && esbuild server/main.ts mcp/server.ts --bundle --platform=node --packages=external --format=esm --outbase=. --outdir=dist-server",
+    "start": "node dist-server/server/main.js",
+    "mcp": "tsx mcp/server.ts",
+    "mcp:built": "node dist-server/mcp/server.js",
+    "build:runtime": "esbuild runtime/standalone.ts --bundle --platform=browser --format=iife --minify --outfile=dist/runtime.js",
+    "pretest": "npm run build:runtime",
     "lint": "tsc --noEmit",
-    "preview": "vite preview"
+    "test": "tsx --test tests/*.test.ts",
+    "preview": "vite preview",
+    "verify:release": "tsx scripts/verify-release.ts",
+    "format:check": "prettier --check components/ProjectStudio.tsx components/StudioInspectors.tsx services/projectDocument.ts services/assetAssembly.ts server runtime mcp scripts"
   },
   "dependencies": {
-    "@google/genai": "^1.29.1",
-    "concurrently": "^9.2.1",
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@resvg/resvg-js": "^2.6.2",
+    "express": "^5.3.0",
     "lucide-react": "^0.553.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "simplex-noise": "^4.0.3",
     "three": "^0.181.1",
-    "three-mesh-bvh": "^0.9.9"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/three": "^0.183.1",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.27",
+    "concurrently": "^10.0.6",
+    "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.2.6",
     "postcss": "^8.5.8",
+    "prettier": "^3.9.10",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

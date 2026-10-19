@@ -4,6 +4,8 @@ node_modules
 # Build output
 dist
 dist-ssr
+dist-server
+.voxshop
 
 # Bridge runtime files (written at runtime, not source)
 _bridge/request.json
