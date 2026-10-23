@@ -1,0 +1,106 @@
+.terrain-edit-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  max-width: calc(100% - 28px);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid #ffffff22;
+  border-radius: 9px;
+  background: #101923e8;
+  box-shadow: 0 8px 24px #0005;
+  color: #dce7ec;
+  font:
+    11px Inter,
+    system-ui,
+    sans-serif;
+}
+.terrain-edit-toolbar button {
+  min-height: 30px;
+  padding: 6px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: #c5d4dc;
+}
+.terrain-edit-toolbar button[aria-pressed='true'] {
+  background: #24414a;
+  color: #a5f3ed;
+}
+.terrain-edit-toolbar .terrain-edit-palette {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: capitalize;
+}
+.terrain-edit-toolbar .terrain-edit-palette span {
+  width: 12px;
+  height: 12px;
+  border: 1px solid #ffffff60;
+  border-radius: 3px;
+}
+.terrain-edit-toolbar .terrain-edit-custom-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #a8b8c1;
+}
+.terrain-edit-toolbar .terrain-edit-custom-field input,
+.terrain-edit-toolbar .terrain-edit-custom-field select {
+  min-height: 30px;
+  border: 1px solid #ffffff24;
+  border-radius: 5px;
+  background: #182630;
+  color: #dce7ec;
+}
+.terrain-edit-toolbar .terrain-edit-custom-field input[type='color'] {
+  width: 34px;
+  padding: 3px;
+}
+.terrain-edit-toolbar .terrain-edit-custom-field select {
+  padding: 4px 6px;
+  text-transform: capitalize;
+}
+.terrain-edit-toolbar .terrain-edit-done {
+  border-left: 1px solid #ffffff20;
+  border-radius: 0;
+}
+.terrain-edit-toolbar small {
+  padding: 0 5px;
+  color: #a8b8c1;
+  white-space: nowrap;
+}
+.terrain-edit-toolbar .terrain-inspection {
+  display: grid;
+  flex: 1 1 100%;
+  gap: 3px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: #07101880;
+  color: #c5d4dc;
+  line-height: 1.45;
+}
+.terrain-edit-toolbar .terrain-inspection b {
+  color: #a8b8c1;
+  font-weight: 500;
+}
+.terrain-edit-toolbar .terrain-inspection code {
+  color: #a5f3ed;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .terrain-edit-toolbar {
+    left: 8px;
+    right: 8px;
+    flex-wrap: wrap;
+  }
+  .terrain-edit-toolbar small {
+    width: 100%;
+    padding: 0 6px 2px;
+  }
+}

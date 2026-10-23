@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, FileJson, Upload, Copy, Check } from 'lucide-react';
+import { X, FileJson, Upload, Copy, Check, Download } from 'lucide-react';
 
 interface JsonModalProps {
   isOpen: boolean;
@@ -36,7 +36,7 @@ export const JsonModal: React.FC<JsonModalProps> = ({ isOpen, onClose, data = ''
               onClose();
           }
       } catch (e) {
-          setError('Invalid JSON format. Please check your input.');
+          setError(e instanceof Error ? e.message : 'Invalid JSON format. Please check your input.');
       }
   };
 
@@ -49,6 +49,15 @@ export const JsonModal: React.FC<JsonModalProps> = ({ isOpen, onClose, data = ''
       } catch (err) {
           console.error('Failed to copy:', err);
       }
+  };
+
+  const handleDownload = () => {
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'voxshop-model.json';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -69,6 +78,7 @@ export const JsonModal: React.FC<JsonModalProps> = ({ isOpen, onClose, data = ''
           </div>
           <button 
             onClick={onClose}
+            aria-label="Close JSON dialog"
             className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition-colors"
           >
             <X size={24} strokeWidth={3} />
@@ -77,6 +87,7 @@ export const JsonModal: React.FC<JsonModalProps> = ({ isOpen, onClose, data = ''
 
         <div className="flex-1 p-6 overflow-hidden bg-slate-50/50 flex flex-col relative">
           <textarea 
+            aria-label={isImport ? 'Model JSON to import' : 'Model JSON'}
             readOnly={!isImport}
             value={isImport ? importText : data}
             onChange={isImport ? (e) => setImportText(e.target.value) : undefined}
@@ -109,6 +120,13 @@ export const JsonModal: React.FC<JsonModalProps> = ({ isOpen, onClose, data = ''
               </>
           ) : (
               <>
+                <button
+                    onClick={handleDownload}
+                    className="flex items-center gap-2 px-6 py-3 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                >
+                    <Download size={18} />
+                    Download JSON
+                </button>
                 <button
                     onClick={handleCopy}
                     className={`

@@ -4,6 +4,12 @@ node_modules
 # Build output
 dist
 dist-ssr
+dist-server
+.voxshop
+src-tauri/target
+src-tauri/binaries/*
+src-tauri/gen/
+desktop/game-player/src-tauri/gen/
 
 # Bridge runtime files (written at runtime, not source)
 _bridge/request.json
@@ -16,6 +22,12 @@ _bridge/response.json
 
 # Claude Code project memory (private)
 .claude
+
+# Local Sites account/project bindings
+.openai/
+
+# Historical/generated visual evidence (kept local)
+/evidence/
 
 # AI-generated model scripts (created as side-effect by CLI agents)
 *.cjs

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101318" />
+    <title>VoxShop — Hexxis Studios</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        background: #101318;
+        color: #f4f5f7;
+      }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(30rem, calc(100vw - 3rem));
+        text-align: center;
+      }
+      img {
+        width: min(12rem, 55vw);
+        height: auto;
+        margin-bottom: 1.5rem;
+      }
+      p {
+        color: #adb4bf;
+      }
+      button {
+        margin-top: 1rem;
+        border: 0;
+        border-radius: 0.5rem;
+        padding: 0.7rem 1.2rem;
+        background: #5e7cff;
+        color: white;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 3px solid white;
+        outline-offset: 3px;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="../assets/voxshop_logo.png" alt="VoxShop by Hexxis Studios" />
+      <p id="status" role="status" aria-live="polite">Starting VoxShop…</p>
+      <p id="error" hidden></p>
+      <button id="retry" type="button" hidden>Try again</button>
+    </main>
+    <script type="module" src="./bootstrap.ts"></script>
+  </body>
+</html>

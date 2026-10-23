@@ -59,6 +59,10 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClos
                 <Cpu size={12} className="text-blue-500/50" />
                 Asset Pipeline
             </div>
+            <p className="text-xs leading-relaxed text-slate-400">
+              These settings power sculpt generation only. For full game authoring through your own agent subscription, connect it in Studio with{' '}
+              <span className="text-slate-200">Build with your own agent</span>.
+            </p>
             
             <div className="grid grid-cols-2 gap-2 p-1 bg-black/20 rounded-xl border border-white/5">
               <button
@@ -104,7 +108,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClos
                     <div className="text-[9px] text-blue-200/70 font-medium leading-relaxed space-y-1.5">
                       <p className="font-black text-blue-300/90 uppercase tracking-wider">CLI Worker Setup</p>
                       <p>1. Right-click the project folder → <span className="text-white/60">Open in Terminal</span></p>
-                      <p>2. Start your AI CLI: <span className="text-white/60">claude</span>, <span className="text-white/60">gemini --yolo</span>, copilot, etc.</p>
+                      <p>2. Start your chosen AI CLI normally, with its usual permissions and account.</p>
                       <p>3. Tell it: <span className="text-white/60">"Activate the skill in ./skills/VOXEL_SKILL.md"</span></p>
                     </div>
                   </div>
@@ -133,7 +137,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({ isOpen, onClos
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">API Key</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">API Key · this session only</label>
                     <input
                       type="password"
                       value={settings.apiKey || ''}

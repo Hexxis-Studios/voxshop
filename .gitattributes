@@ -1,0 +1,16 @@
+# Consumer source archives omit developer tests and local agent instructions.
+/tests/ export-ignore
+/.github/ export-ignore
+/.agents/ export-ignore
+/AGENTS.md export-ignore
+/CLAUDE.md export-ignore
+/GEMINI.md export-ignore
+/scripts/verify-*.ts export-ignore
+/scripts/verify-*.mjs export-ignore
+/scripts/benchmark-*.ts export-ignore
+/scripts/prepare-standalone-throughput.ts export-ignore
+/docs/agent-completion-checklist.md export-ignore
+/docs/delivery-checkpoint.md export-ignore
+/docs/engine-roadmap.md export-ignore
+/docs/implementation-status.md export-ignore
+/docs/reliable-model-editing.md export-ignore

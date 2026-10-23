@@ -1,0 +1,3 @@
+# VoxShop — Hexxis Studios
+
+Read skills/ENGINE_GUIDE.md before engine or editor work and discover current MCP schemas before authoring. Preserve the original logo, Hexxis Studios branding and existing user projects. The current release is 2.0.0-alpha.1. Project/model document schema versions are independent. Follow LICENSE and preserve dependency notices. Keep rendering, simulation, persistence, UI and transport modular. Run the contributor checks in docs/verification.md for meaningful changes and visually inspect rendering/interaction changes. Add verified reusable findings to skills/ENGINE_LIMITS.md; never put private project data, credentials or local execution diaries in shared guidance.

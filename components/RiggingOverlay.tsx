@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SkeletonDef, SKELETONS } from '../utils/riggingConstants';
 import { X, Paintbrush, Play, Square, ChevronRight, Wand2, Hammer, Zap, Cpu } from 'lucide-react';
+import type { VoxelData } from '../types';
 
 const SectionLabel: React.FC<{icon: React.ReactNode, label: string}> = ({ icon, label }) => (
     <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] flex items-center gap-2">
@@ -13,9 +14,11 @@ const SectionLabel: React.FC<{icon: React.ReactNode, label: string}> = ({ icon, 
 interface RiggingOverlayProps {
     initialSkeleton: SkeletonDef | null;
     hasRigData: boolean;
+    selectedVoxel: VoxelData | null;
     onClose: () => void;
-    onEnablePaint: (boneName: string, color: string) => void;
+    onEnablePaint: (boneName: string, color: string, influence: number) => void;
     onDisablePaint: () => void;
+    onSetSelectedWeight: (boneName: string, influence: number) => void;
     onAutoRig: (skeleton: SkeletonDef) => void;
     onBuildRig: (skeleton: SkeletonDef) => void;
     onPlayAnimation: (skeleton: SkeletonDef, animName: string, loop: boolean) => void;
@@ -26,9 +29,11 @@ interface RiggingOverlayProps {
 export const RiggingOverlay: React.FC<RiggingOverlayProps> = ({
     initialSkeleton,
     hasRigData,
+    selectedVoxel,
     onClose,
     onEnablePaint,
     onDisablePaint,
+    onSetSelectedWeight,
     onAutoRig,
     onBuildRig,
     onPlayAnimation,
@@ -37,8 +42,14 @@ export const RiggingOverlay: React.FC<RiggingOverlayProps> = ({
 }) => {
     const [selectedSkeleton, setSelectedSkeleton] = useState<SkeletonDef>(initialSkeleton || SKELETONS[0]);
     const [activeBone, setActiveBone] = useState<string | null>(null);
+    const [paintInfluence, setPaintInfluence] = useState(100);
     const [isPlaying, setIsPlaying] = useState(false);
     const [activeAnim, setActiveAnim] = useState<string | null>(null);
+    const selectedWeights = selectedVoxel?.weights?.length
+        ? selectedVoxel.weights
+        : selectedVoxel?.bone
+            ? [{ bone: selectedVoxel.bone, weight: 1 }]
+            : [];
 
     const handleBoneClick = (boneName: string, color: string) => {
         if (activeBone === boneName) {
@@ -46,7 +57,7 @@ export const RiggingOverlay: React.FC<RiggingOverlayProps> = ({
             onDisablePaint();
         } else {
             setActiveBone(boneName);
-            onEnablePaint(boneName, color);
+            onEnablePaint(boneName, color, paintInfluence / 100);
         }
     };
 
@@ -107,6 +118,20 @@ export const RiggingOverlay: React.FC<RiggingOverlayProps> = ({
 
                 <div className="flex flex-col gap-3">
                     <SectionLabel icon={<Paintbrush size={12} />} label="Weight Painting" />
+                    <div role="status" aria-live="polite" className="rounded-lg border border-white/10 bg-white/5 p-3 text-[10px] text-slate-300">
+                        <div className="font-bold uppercase tracking-wider text-slate-400">Selected voxel weights</div>
+                        {selectedVoxel ? (
+                            <>
+                                <div className="mt-1 text-slate-400">({selectedVoxel.x}, {selectedVoxel.y}, {selectedVoxel.z})</div>
+                                {selectedWeights.length ? selectedWeights.map(weight => (
+                                    <div key={weight.bone} className="mt-1 flex justify-between gap-3">
+                                        <span>{weight.bone}</span>
+                                        <span>{(weight.weight * 100).toFixed(1)}%</span>
+                                    </div>
+                                )) : <div className="mt-1">Unrigged</div>}
+                            </>
+                        ) : <div className="mt-1">Turn painting off, then click a voxel to inspect its influences.</div>}
+                    </div>
                     <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                         {selectedSkeleton.bones.map(bone => (
                             <button
@@ -122,6 +147,42 @@ export const RiggingOverlay: React.FC<RiggingOverlayProps> = ({
                             </button>
                         ))}
                     </div>
+                    <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        <span className="flex items-center justify-between">
+                            Joint influence
+                            <output className="text-blue-300">{paintInfluence}%</output>
+                        </span>
+                        <input
+                            aria-label="Painted joint influence"
+                            type="range"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={paintInfluence}
+                            onChange={(event) => {
+                                const value = Number(event.currentTarget.value);
+                                setPaintInfluence(value);
+                                if (!activeBone) return;
+                                const bone = selectedSkeleton.bones.find((item) => item.name === activeBone);
+                                if (bone) onEnablePaint(bone.name, bone.color, value / 100);
+                            }}
+                        />
+                        Remaining weight is shared across the voxel’s current joint influences.
+                    </label>
+                    <button
+                        type="button"
+                        aria-label="Apply influence to selected voxel"
+                        disabled={!selectedVoxel || selectedVoxel.isLocked || !activeBone}
+                        onClick={() => activeBone && onSetSelectedWeight(activeBone, paintInfluence / 100)}
+                        className="w-full rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-blue-200 enabled:hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        Apply to selected voxel
+                    </button>
+                    {selectedVoxel?.isLocked && (
+                        <div role="status" className="text-[10px] text-amber-300">
+                            This voxel is locked and its weights cannot be changed.
+                        </div>
+                    )}
                     <button 
                         onClick={() => onBuildRig(selectedSkeleton)}
                         className="w-full py-3 mt-2 rounded-xl font-black text-[10px] uppercase tracking-[0.2em] text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/20"

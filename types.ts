@@ -1,24 +1,25 @@
-import * as THREE from 'three';
+import type * as THREE from 'three';
+import type { SkeletonDef } from './utils/riggingConstants';
 
 export enum AppState {
   STABLE = 'STABLE',
   DISMANTLING = 'DISMANTLING',
   REBUILDING = 'REBUILDING',
   RIGGING = 'RIGGING',
-  EDITING = 'EDITING'
+  EDITING = 'EDITING',
 }
 
 export enum VoxelMaterial {
   STANDARD = 'STANDARD',
   METALLIC = 'METALLIC',
   GLASS = 'GLASS',
-  EMISSIVE = 'EMISSIVE'
+  EMISSIVE = 'EMISSIVE',
 }
 
 export enum DetailLevel {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
-  HIGH = 'HIGH'
+  HIGH = 'HIGH',
 }
 
 export enum Pose {
@@ -30,7 +31,7 @@ export enum Pose {
   WINGS_SPREAD = 'WINGS_SPREAD',
   TORPEDO = 'TORPEDO',
   STAR_POSE = 'STAR_POSE',
-  MOUTH_OPEN = 'MOUTH_OPEN'
+  MOUTH_OPEN = 'MOUTH_OPEN',
 }
 
 export interface VoxelWeight {
@@ -82,22 +83,8 @@ export interface RebuildTarget {
 }
 
 export interface VoxelDelta {
-  action: 'add' | 'delete' | 'paint' | 'move' | 'lock';
-  voxels: {
-    x: number;
-    y: number;
-    z: number;
-    oldColor?: number;
-    newColor?: number;
-    oldPos?: { x: number, y: number, z: number };
-    newPos?: { x: number, y: number, z: number };
-    wasLocked?: boolean;
-  }[];
-}
-
-export interface ChangeLogEntry {
-  timestamp: number;
-  delta: VoxelDelta;
+  action: 'add' | 'delete' | 'paint' | 'move' | 'lock' | 'fill' | 'weight' | 'replace' | 'transform';
+  voxels: { before: VoxelData | null; after: VoxelData | null }[];
 }
 
 export interface SymmetryConfig {
@@ -110,6 +97,7 @@ export interface SavedModel {
   name: string;
   data: VoxelData[];
   baseModel?: string;
+  skeleton?: SkeletonDef | null;
 }
 
 export interface SceneObject {

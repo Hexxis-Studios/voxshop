@@ -188,7 +188,7 @@ interface UIOverlayProps {
   onImportVox: (file: File) => void;
   onImportQB: (file: File) => void;
   onImportMinecraft: (file: File) => void;
-  onVoxelizeText: (text: string) => void;
+  onVoxelizeText: (text?: string) => void;
   onExportHistory: () => void;
   onGenerateSphere: () => void;
   onGenerateTerrain: () => void;
@@ -311,10 +311,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
                     <div className="px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Converters</div>
                     <DropdownItem onClick={() => imageInputRef.current?.click()} icon={<ImageIcon size={16}/>} label="Image to Voxel" />
-                    <DropdownItem onClick={() => {
-                        const text = prompt("Enter text to voxelize:");
-                        if (text) onVoxelizeText(text);
-                    }} icon={<Type size={16}/>} label="Text to Voxel" />
+                    <DropdownItem onClick={() => onVoxelizeText()} icon={<Type size={16}/>} label="Text to Voxel" />
 
                     <div className="h-px bg-white/5 my-1" />
                     <div className="px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Procedural</div>

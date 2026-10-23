@@ -1,0 +1,18 @@
+{
+  "name": "voxshop-desktop-runtime",
+  "private": true,
+  "version": "2.0.0-alpha.1",
+  "type": "module",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@resvg/resvg-js": "2.6.2",
+    "express": "5.3.0",
+    "simplex-noise": "4.0.3",
+    "three": "0.181.2",
+    "ws": "8.22.0",
+    "zod": "4.6.7"
+  },
+  "author": "Hexxis Studios",
+  "license": "SEE LICENSE IN LICENSE"
+}
