@@ -13,6 +13,7 @@ VoxShop grows from a voxel asset workshop into a voxel game-authoring studio. Th
 - Added self-contained browser game exports and Windows game-player packaging.
 - Added agent discovery, revisioned authoring tools and connected-editor visual walkthroughs using compatible agents' own subscriptions.
 - Preserved the original VoxShop logo and updated the publisher to Hexxis Studios.
+- Updated the bundled Node runtime and patched dependency security advisories. Application downloads omit developer tests, local account data and compiler home paths.
 - Introduced source-available v2 licensing with explicit royalty-free commercial game/asset output permission. Previously Apache-licensed code retains its existing rights.
 
 ### Alpha limits

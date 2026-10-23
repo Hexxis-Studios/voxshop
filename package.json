@@ -68,5 +68,8 @@
     "vite": "^6.2.0"
   },
   "author": "Hexxis Studios",
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "node": ">=24.22.1"
+  }
 }

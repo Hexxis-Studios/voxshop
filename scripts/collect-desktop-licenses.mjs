@@ -186,6 +186,6 @@ const rows = records.map((record) => {
 });
 await writeFile(
   path.join(resourcesRoot, 'THIRD_PARTY_NOTICES.md'),
-  `# Third-party notices\n\nVoxShop is licensed separately under Apache-2.0 in \`LICENSE\`. The notices below cover bundled Node.js and runtime dependencies; they are dependency notices, not collaborator credits.\n\n${rows.join('\n')}\n`,
+  `# Third-party notices\n\nVoxShop 2 has separate source-available terms in \`LICENSE\`, including royalty-free commercial Game Output Permission. Previously Apache-licensed code retains its original rights. The notices below cover bundled Node.js and runtime dependencies; they are dependency notices, not collaborator credits.\n\n${rows.join('\n')}\n`,
 );
 console.log(`Collected ${records.length} JavaScript, Rust, and Node.js license notices.`);

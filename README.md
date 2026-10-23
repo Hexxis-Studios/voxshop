@@ -50,7 +50,7 @@ Old workshop libraries migrate when found at the same browser origin. A desktop 
 
 ## Run from source in a browser
 
-Install Node.js 24 or later, then:
+Install the latest supported Node.js LTS (24.22.1 or newer), then:
 
 ```sh
 npm ci

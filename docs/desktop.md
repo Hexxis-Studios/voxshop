@@ -6,7 +6,7 @@ The shell is a packaging and lifecycle layer; it does not turn the renderer into
 
 ## Windows
 
-Source builds require Node.js 24+, Rust, Microsoft C++ Build Tools and WebView2. Follow [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/) for the toolchain.
+Source builds require a supported Node.js release at least 24.22.1, Rust, Microsoft C++ Build Tools and WebView2. Follow [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/) for the toolchain. Packaging rejects older Node versions rather than distributing an outdated service runtime.
 
 ```sh
 npm ci

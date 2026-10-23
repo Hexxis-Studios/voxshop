@@ -19,6 +19,9 @@ function targetTriple() {
 }
 
 async function prepareSidecar() {
+  const [major, minor, patch] = process.versions.node.split('.').map(Number);
+  if (major < 24 || (major === 24 && (minor < 22 || (minor === 22 && patch < 1))))
+    throw new Error('Build desktop packages with Node.js 24.22.1 or a newer supported release.');
   const triple = targetTriple();
   const extension = process.platform === 'win32' ? '.exe' : '';
   const output = path.join(sidecarRoot, `voxshop-node-${triple}${extension}`);
