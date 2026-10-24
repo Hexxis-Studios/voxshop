@@ -797,7 +797,7 @@ test('external MCP client creates, generates, previews, edits, undoes, saves and
     name: 'preview_capture',
     arguments: { projectId: 'mcp-game', assetId: 'original' },
   });
-  assert.notEqual(preview.isError, true);
+  assert.notEqual(preview.isError, true, JSON.stringify(preview));
   const img = (preview as any).content[0];
   assert.equal(img.type, 'image');
   assert.equal(img.mimeType, 'image/png');

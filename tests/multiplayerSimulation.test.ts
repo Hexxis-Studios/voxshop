@@ -517,7 +517,8 @@ test('real gateway transitions both clients, preserves campaign actors and resto
       'the shared tick timer should advance at its authored interval, once per simulation step',
     );
 
-    const transitionAt = first.messages.length;
+    const transitionAt = first.messages.length,
+      secondTransitionAt = second.messages.length;
     second.socket.send(JSON.stringify({ version: 1, type: 'input', sequence: secondSequence++, input: { interact: true } }));
     const transitioned = await waitForMessage(first, transitionAt, (message): message is Extract<ServerMessage, { type: 'snapshot' }> =>
       isSnapshot(message) && message.game?.sceneId === nextSceneId,
@@ -529,12 +530,10 @@ test('real gateway transitions both clients, preserves campaign actors and resto
     assert.deepEqual(playerState(transitioned, secondJoined.playerId).inventory.map((stack) => stack.itemId), ['alpha', 'beta']);
     assert.equal(playerState(transitioned, firstJoined.playerId).health, firstHealth);
     assert.equal(playerState(transitioned, secondJoined.playerId).health, secondHealth);
-    const sharedTransition = await waitFor(() => {
-      const snapshot = lastMessage(second!, (message): message is Extract<ServerMessage, { type: 'snapshot' }> =>
-        isSnapshot(message) && message.game?.sceneId === nextSceneId,
-      );
-      return snapshot?.game ? snapshot : false;
-    });
+    const sharedTransition = await waitForMessage(second, secondTransitionAt,
+      (message): message is Extract<ServerMessage, { type: 'snapshot' }> =>
+        isSnapshot(message) && message.serverTick === transitioned.serverTick && message.game?.sceneId === nextSceneId,
+    );
     assert.deepEqual(sharedTransition.game, transitioned.game, 'both clients receive identical transition snapshots');
 
     await gateway.close();
