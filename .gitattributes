@@ -14,3 +14,4 @@
 /docs/engine-roadmap.md export-ignore
 /docs/implementation-status.md export-ignore
 /docs/reliable-model-editing.md export-ignore
+/docs/evidence/** export-ignore

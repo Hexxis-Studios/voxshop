@@ -78,7 +78,7 @@ test('external MCP client creates, generates, previews, edits, undoes, saves and
     contents.map((content) => ('text' in content ? content.text : '')).join('\n');
   assert.match(resourceText(workflow.contents), /tools\/list/);
   assert.match(resourceText(skill.contents), /tools\/list/);
-  assert.match(resourceText(findings.contents), /alpha limits/);
+  assert.match(resourceText(findings.contents), /current capabilities and limits/i);
   assert.match(resourceText(findings.contents), /heightfields/);
   const call = async (name: string, args: any = {}) => {
     const r = await client.callTool({ name, arguments: args });

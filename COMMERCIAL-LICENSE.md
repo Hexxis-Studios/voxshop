@@ -1,6 +1,6 @@
 # Commercial use of VoxShop
 
-VoxShop 2 alpha is source available under the [license](LICENSE), based on PolyForm Noncommercial 1.0.0 with supplemental terms.
+VoxShop is source available under the [license](LICENSE), based on PolyForm Noncommercial 1.0.0 with supplemental terms.
 
 **You may create, publish and sell your own games and assets with VoxShop, including as a studio, without royalties or a separate commercial agreement.** The Game Output Permission covers the embedded runtime needed to play those games. Your games, artwork and other original content remain yours. No VoxShop logo, splash screen or game credit is required; retain the included software license notices.
 

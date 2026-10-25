@@ -11,4 +11,4 @@ The staging command validates the embedded game payload and writes a game-specif
 
 The staged `frontendDist` is an array containing the exact HTML file, with `index.html` as the window URL. An absolute Windows directory string can be parsed as a URL by Tauri and show a folder index instead of embedding the game. The player's content policy permits embedded WebAssembly for Rapier and the same optional secure/loopback multiplayer connections as browser exports; it keeps general JavaScript eval disabled. Campaign saves use the game-specific app identity and survive player relaunch.
 
-This first player target is Windows-only. It keeps the standalone HTML export available. The engine release is `2.0.0-alpha.1`; native project schema versions are unchanged.
+This first player target is Windows-only. It keeps the standalone HTML export available. Native project schema versions are unchanged.

@@ -31,7 +31,7 @@ const sensitiveFile = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx)|id_rsa(?:\.pub
 const files = [];
 for (const entry of listed.stdout.toString('utf8').split('\0').filter(Boolean).sort()) {
   const parts = entry.split(/[\\/]/);
-  if (parts[0] === 'evidence') continue;
+  if (parts.includes('evidence')) continue;
   if (['server.js', 'wait_for_request.ps1'].includes(entry) || parts[0] === '_bridge') continue;
   if (/^(?:desktop\/game-player\/)?src-tauri\/gen\//.test(entry)) continue;
   if (['AGENTS.md', 'CLAUDE.md', 'GEMINI.md'].includes(entry)) continue;

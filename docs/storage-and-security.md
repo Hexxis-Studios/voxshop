@@ -41,6 +41,6 @@ The editor has no telemetry upload and no external font dependency. Diagnostics 
 
 ## Release privacy
 
-User projects, access tokens, local account bindings, logs and acceptance recordings are excluded from published release contents. Windows builds remap local compiler paths. The installed editor carries its runtime, public agent guidance and required license notices; developer tests and execution notes are not application resources.
+The installed editor carries its runtime, public agent guidance and required dependency notices. User projects and local service credentials remain in the user's application-data directory, outside the installation. Source archives do not include private hosting bindings or local logs.
 
 Local service access is not an OS sandbox. A process already running as the same user may read that user's project files. Use trusted agent clients and model endpoints, keep access files private, and report suspected security problems without posting real credentials or private projects in public issues. Dependency audits and regression checks reduce known risks; they do not guarantee an absence of vulnerabilities.

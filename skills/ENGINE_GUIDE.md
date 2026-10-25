@@ -18,6 +18,4 @@ For a prompted interaction, add an enabled `interactable` component with a usefu
 
 Portable project/model documents preserve editable engine data. Mesh exports have different capabilities; do not promise that every legacy model format preserves scene rules, equipment or new animation features. Save before clearing storage or moving installations.
 
-Engine development should keep rendering, simulation, persistence, authoring and transport independent. Reuse existing helpers and dependencies. Add a focused runnable regression for meaningful behavior changes and an actual visual pass for rendering/interaction changes. Update shared guidance when a reusable fact is established; distinguish measured results from assumptions and preserve user work.
-
-See `voxshop://engine/findings` for the current alpha boundaries. Game genres are not permanent architectural restrictions.
+See `voxshop://engine/findings` and the current limits resource for supported behavior and known constraints. Game genres are not permanent architectural restrictions.

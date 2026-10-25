@@ -1,6 +1,6 @@
-# Verified engine findings and alpha limits
+# Current capabilities and limits
 
-VoxShop 2 alpha supports Windows desktop authoring, local browser authoring, self-contained browser games and Windows game packaging. Linux packaging is deferred. The Tauri shell packages the existing renderer and local service; it does not itself increase rendering throughput.
+VoxShop supports Windows desktop authoring, local browser authoring, self-contained browser games and Windows game packaging. Linux packages are not currently included. The Tauri shell packages the existing renderer and local service; it does not itself increase rendering throughput.
 
 - Project transactions are revisioned, atomic, retryable and immediately saved. Undo/redo is bounded to 20 entries and 32 MiB. Import creates a separate project. Keep portable backups.
 - Local stdio MCP exposes shared authoring and real connected-editor viewport tools. Client setup examples do not certify every third-party agent or subscription. Voice is supplied by the chosen agent.
@@ -15,4 +15,4 @@ VoxShop 2 alpha supports Windows desktop authoring, local browser authoring, sel
 - Standalone startup must preserve an already restored simulation. Re-entering Play during walkthrough initialization discards its save. Only explicit reset should restart the game.
 - Framing large terrain must fit fog distance as well as camera clipping. When an entire world looks like sky, inspect fog and camera bounds before changing terrain data.
 
-The automated and visual acceptance fixtures establish their tested workflows, rather than every genre, device or performance target. Report new reproducible findings with the affected contract, check and limitation; do not include private project data, credentials or local execution diaries in shared guidance.
+The supported features and limits describe current engine behavior; they do not guarantee compatibility with every genre, device or performance target.

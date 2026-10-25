@@ -133,7 +133,7 @@ try {
   if (
     !/tools\/list/.test(readText(workflow.contents)) ||
     !/tools\/list/.test(readText(skill.contents)) ||
-    !/alpha limits/.test(readText(findings.contents))
+    !/current capabilities and limits/i.test(readText(findings.contents))
   )
     throw new Error('Built MCP guidance resources did not return their expected shared content.');
   output.checks.push({ check: 'Built MCP shared agent guidance resources', passed: true });

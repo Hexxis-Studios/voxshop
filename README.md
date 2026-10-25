@@ -1,8 +1,8 @@
-# VoxShop 2 Alpha
+# VoxShop
 
 **A free voxel game engine and creative studio by Hexxis Studios.** Create editable models, animate characters, build worlds and gameplay, then export games for the browser or Windows. Work manually or connect your own AI agent through MCP.
 
-This is **2.0.0-alpha.1**, an early-access release. The original voxel workshop is still included, with a new game-authoring workflow around it.
+Current release: **2.0.0-alpha.1**. The original voxel workshop is included alongside scene, world and game authoring.
 
 ## Download
 
@@ -40,7 +40,7 @@ The agent discovers the authoring tools and shared guidance from VoxShop. Your e
 - Authoritative multiplayer hosting and room joining in editor Play and exported games.
 - Chunk streaming, greedy meshing, spatial instancing, culling and distant terrain detail.
 
-These are composable systems rather than fixed game genres. See the [engine/API guide](docs/engine-api.md), [multiplayer hosting](docs/multiplayer-hosting.md) and [alpha limits](skills/ENGINE_LIMITS.md).
+These are composable systems rather than fixed game genres. See the [engine/API guide](docs/engine-api.md), [multiplayer hosting](docs/multiplayer-hosting.md) and [platform and runtime guide](skills/ENGINE_LIMITS.md).
 
 ## Save your work
 
@@ -60,17 +60,17 @@ npm start
 
 Open [localhost:4269](http://localhost:4269). For development, `npm run dev` starts the editor at [127.0.0.1:3000](http://127.0.0.1:3000). The engine does not require Sites or a hosted account. See [desktop builds](docs/desktop.md), [storage and security](docs/storage-and-security.md) and [contributor checks](docs/verification.md).
 
-Installers contain the app and required dependencies/notices. Consumer source archives omit development tests, generated evidence and private tooling; clone the repository for the complete contributor checks.
+Installers contain the app and required dependencies/notices. Contributors can clone the repository for development and tests.
 
-## Alpha status and feedback
+## Feedback
 
-Windows/browser creation, persistence, exports and local multiplayer have passed automated and visual acceptance. Hardware coverage is limited; physical controller/touch testing and internet multiplayer coverage are still developing. Coarse terrain transitions and smooth-heightfield collision approximations are documented. This release makes no universal FPS or every-game compatibility guarantee.
+See the [platform and runtime guide](skills/ENGINE_LIMITS.md) for supported outputs, storage, terrain and multiplayer behavior.
 
 [Report a problem](https://github.com/Hexxis-Studios/voxshop/issues) with reproduction steps, your platform and the expected/actual behavior. Share a minimal project only if you intend to make it public. Avoid posting credentials or private files.
 
 ## License
 
-VoxShop 2 is **source available**, based on PolyForm Noncommercial with the [supplemental terms in LICENSE](LICENSE). **Individuals and studios may create and sell their own games and assets royalty-free.** Selling or monetizing VoxShop itself or a derivative editor/engine requires separate permission. Free public forks must preserve attribution and provide source; modified products must use their own branding. See [commercial licensing](COMMERCIAL-LICENSE.md).
+VoxShop is **source available**, based on PolyForm Noncommercial with the [supplemental terms in LICENSE](LICENSE). **Individuals and studios may create and sell their own games and assets royalty-free.** Selling or monetizing VoxShop itself or a derivative editor/engine requires separate permission. Free public forks must preserve attribution and provide source; modified products must use their own branding. See [commercial licensing](COMMERCIAL-LICENSE.md).
 
 Previously published Apache-licensed code retains its existing rights. Third-party dependencies retain their own licenses and required notices.
 
