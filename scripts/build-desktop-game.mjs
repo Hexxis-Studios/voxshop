@@ -7,8 +7,7 @@ import { stageDesktopGame } from './stage-desktop-game.mjs';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function buildDesktopGame(sourceHtmlPath) {
-  if (process.platform !== 'win32')
-    throw new Error('Windows game packaging must run on Windows. Other desktop targets are deferred.');
+  if (process.platform !== 'win32') throw new Error('Build Windows game installers on Windows.');
 
   const staged = await stageDesktopGame(sourceHtmlPath);
   const targetDirectory = path.join(projectRoot, '.voxshop', 'game-player', 'target');

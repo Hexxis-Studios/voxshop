@@ -20,7 +20,11 @@ function open(socket: WebSocket) {
   });
 }
 
-function waitForTypes(socket: WebSocket, expectedTypes: string[]) {
+function waitForTypes(
+  socket: WebSocket,
+  expectedTypes: string[],
+  predicate: (messages: ServerMessage[]) => boolean = () => true,
+) {
   const expected = new Set(expectedTypes);
   const messages: ServerMessage[] = [];
   return new Promise<ServerMessage[]>((resolve, reject) => {
@@ -32,7 +36,7 @@ function waitForTypes(socket: WebSocket, expectedTypes: string[]) {
       const message = JSON.parse(data.toString()) as ServerMessage;
       messages.push(message);
       expected.delete(message.type);
-      if (expected.size === 0) {
+      if (expected.size === 0 && predicate(messages)) {
         clearTimeout(timer);
         socket.off('message', onMessage);
         resolve(messages);
@@ -871,7 +875,17 @@ test('authenticated local host creates credentialed rooms and commits authoritat
     assert.equal(joined.nextInputSequence, undefined);
 
     const queuedResponse = waitForTypes(socket, ['queued']);
-    const publishedMessages = waitForTypes(socket, ['ack', 'snapshot']);
+    const acknowledgedSnapshot = (messages: ServerMessage[]) => {
+      const ack = messages.find(
+        (message): message is Extract<ServerMessage, { type: 'ack' }> =>
+          message.type === 'ack' && message.inputSequence === 7,
+      );
+      return (
+        !!ack &&
+        messages.some((message) => message.type === 'snapshot' && message.serverTick >= ack.serverTick)
+      );
+    };
+    const publishedMessages = waitForTypes(socket, ['ack', 'snapshot'], acknowledgedSnapshot);
     socket.send(JSON.stringify({ version: 1, type: 'input', sequence: 7, input: { moveX: 0.5 } }));
     assert.deepEqual(
       (await queuedResponse).filter((message) => message.type === 'queued'),
@@ -912,11 +926,15 @@ test('authenticated local host creates credentialed rooms and commits authoritat
     });
     assert.equal(committed.status, 409);
     const messages = await publishedMessages;
-    const ack = messages.find((message) => message.type === 'ack');
+    const ack = messages.find(
+      (message): message is Extract<ServerMessage, { type: 'ack' }> =>
+        message.type === 'ack' && message.inputSequence === 7,
+    );
     assert.ok(ack && ack.type === 'ack');
     assert.equal(ack.inputSequence, 7);
     const snapshot = messages.find(
-      (message) => message.type === 'snapshot' && message.serverTick >= ack.serverTick,
+      (message): message is Extract<ServerMessage, { type: 'snapshot' }> =>
+        message.type === 'snapshot' && message.serverTick >= ack.serverTick,
     );
     assert.ok(snapshot && snapshot.type === 'snapshot' && snapshot.game);
     assert.equal(snapshot.game.projectId, projectBinding.projectId);
