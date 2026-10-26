@@ -99,7 +99,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes xvfb "$deb_path"
           package="$(dpkg-deb --field "$deb_path" Package)"
-          mapfile -t app_bins < <(dpkg-query -L "$package" | grep -E '^/usr/bin/[^/]+$' || true)
+          mapfile -t app_bins < <(dpkg-query -L "$package" | grep -E '^/usr/bin/voxshop-desktop$' || true)
           if (( ${#app_bins[@]} != 1 )) || [[ ! -x "${app_bins[0]}" ]]; then
             printf 'Expected one installed VoxShop launcher under /usr/bin for %s.\n' "$package" >&2
             dpkg-query -L "$package" >&2
