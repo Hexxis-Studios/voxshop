@@ -198,11 +198,15 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
       ...envelope,
       type: z.literal('join'),
       gameId: multiplayerIdSchema,
-      credential: roomCredentialSchema,
+      credential: roomCredentialSchema.optional(),
       reconnect: z.boolean().optional(),
       resumeCredential: roomCredentialSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine((message) => !!message.credential || !!message.resumeCredential, {
+      message: 'Room credential or resume credential is required.',
+      path: ['credential'],
+    }),
   z
     .object({
       ...envelope,

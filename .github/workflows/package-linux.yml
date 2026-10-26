@@ -2,6 +2,11 @@ name: Package VoxShop for Linux
 
 on:
   workflow_dispatch:
+    inputs:
+      evidence_public_key_pem:
+        description: Optional RSA public-key PEM only; private keys are rejected. When omitted, acceptance runs without saving or uploading screenshots.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -63,6 +68,74 @@ jobs:
           dpkg-deb --info "${debs[0]}"
           file "${debs[0]}" "${appimages[0]}"
 
+      - name: Prepare native editor evidence directory
+        run: mkdir -p "${{ runner.temp }}/voxshop-linux-native-evidence"
+
+      - name: Install DEB and verify the native editor viewport
+        shell: bash
+        timeout-minutes: 15
+        env:
+          VOXSHOP_LINUX_EVIDENCE_PUBLIC_KEY_PEM: ${{ inputs.evidence_public_key_pem }}
+        run: |
+          set -euo pipefail
+          evidence_public_key_pem="${VOXSHOP_LINUX_EVIDENCE_PUBLIC_KEY_PEM:-}"
+          unset VOXSHOP_LINUX_EVIDENCE_PUBLIC_KEY_PEM
+          mapfile -t debs < <(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' -print)
+          if (( ${#debs[@]} != 1 )); then
+            printf 'Expected one DEB for native acceptance; found %s.\n' "${#debs[@]}" >&2
+            exit 1
+          fi
+          deb_path="$(realpath "${debs[0]}")"
+
+          evidence="$RUNNER_TEMP/voxshop-linux-native-evidence"
+          data_home="$RUNNER_TEMP/voxshop-linux-native-data"
+          config_home="$RUNNER_TEMP/voxshop-linux-native-config"
+          cache_home="$RUNNER_TEMP/voxshop-linux-native-cache"
+          mkdir -p "$evidence" "$data_home" "$config_home" "$cache_home"
+          runtime_dir="$RUNNER_TEMP/voxshop-linux-native-runtime"
+          mkdir -p "$runtime_dir"
+          chmod 700 "$runtime_dir"
+
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes xvfb "$deb_path"
+          package="$(dpkg-deb --field "$deb_path" Package)"
+          mapfile -t app_bins < <(dpkg-query -L "$package" | grep -E '^/usr/bin/[^/]+$' || true)
+          if (( ${#app_bins[@]} != 1 )) || [[ ! -x "${app_bins[0]}" ]]; then
+            printf 'Expected one installed VoxShop launcher under /usr/bin for %s.\n' "$package" >&2
+            dpkg-query -L "$package" >&2
+            exit 1
+          fi
+
+          app_log="$RUNNER_TEMP/voxshop-linux-native-app.log"
+          export XDG_DATA_HOME="$data_home"
+          export XDG_CONFIG_HOME="$config_home"
+          export XDG_CACHE_HOME="$cache_home"
+          export XDG_RUNTIME_DIR="$runtime_dir"
+          export GDK_BACKEND=x11
+          export LIBGL_ALWAYS_SOFTWARE=1
+          setsid timeout --signal=TERM --kill-after=10s 600s \
+            xvfb-run -a --server-args='-screen 0 1440x900x24' "${app_bins[0]}" \
+            >"$app_log" 2>&1 &
+          app_pid=$!
+
+          terminate_tree() {
+            local parent="$1" child
+            while IFS= read -r child; do
+              [[ -n "$child" ]] && terminate_tree "$child"
+            done < <(pgrep -P "$parent" || true)
+            kill -TERM "$parent" 2>/dev/null || true
+          }
+          cleanup_app() {
+            terminate_tree "$app_pid"
+            wait "$app_pid" 2>/dev/null || true
+          }
+          trap cleanup_app EXIT
+
+          VOXSHOP_LINUX_EVIDENCE_PUBLIC_KEY_PEM="$evidence_public_key_pem" node --import tsx scripts/verify-linux-native.ts "$data_home" "$evidence"
+          unset evidence_public_key_pem
+          cleanup_app
+          trap - EXIT
+
       - name: Upload clean Linux packages
         uses: actions/upload-artifact@v4
         with:
@@ -71,4 +144,13 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Linux native editor evidence
+        if: ${{ always() && inputs.evidence_public_key_pem != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxshop-linux-native-evidence-sealed
+          path: ${{ runner.temp }}/voxshop-linux-native-evidence/*.sealed.json
+          if-no-files-found: warn
           retention-days: 14

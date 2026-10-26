@@ -4,6 +4,7 @@ export type DraftRecovery = {
   baseRevision: number;
   assetId: string | null;
   document: ModelDocument;
+  draftVoxelSize?: number | null;
   updatedAt: number;
 };
 function database(): Promise<IDBDatabase> {

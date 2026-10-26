@@ -28,7 +28,7 @@
     "active": true,
     "icon": ["icons/icon.ico", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
     "publisher": "Hexxis Studios",
-    "shortDescription": "A voxel game engine for Hexxis Studios",
+    "shortDescription": "Voxel game engine and creative studio",
     "longDescription": "Create voxel assets, worlds, and playable games with VoxShop by Hexxis Studios.",
     "targets": ["nsis", "appimage", "deb", "rpm"],
     "externalBin": ["binaries/voxshop-node"],

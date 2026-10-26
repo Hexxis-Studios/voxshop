@@ -15,6 +15,7 @@ import { DiagnosticLogEntry, logger, normalizeExternalLog } from './services/log
 import { AppState, VoxelData, SymmetryConfig, SavedModel, DetailLevel, Pose, VoxelMaterial, SceneObject } from './types';
 import { SKELETONS } from './utils/riggingConstants';
 import { normalizeVoxels, type ModelDocument } from './services/modelDocument';
+import { createGltfFileResolver } from './services/gltfImport';
 import { localApi } from './services/localApi';
 import { APP_VERSION } from './services/appMetadata';
 
@@ -35,12 +36,13 @@ const DEFAULT_SETTINGS: SettingsData = {
   diagnosticsIncludeRawResponses: false
 };
 
-interface SculptProps { initialDocument?: ModelDocument | null; onDocumentChange?: (document: ModelDocument) => void; onSaveAsset?: (name: string, document: ModelDocument) => Promise<void>; embedded?: boolean; active?: boolean; documentOwner?: string }
-const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveAsset, embedded = false, active = true, documentOwner }) => {
+interface SculptProps { initialDocument?: ModelDocument | null; initialDraftVoxelSize?: number | null; onDocumentChange?: (document: ModelDocument, draftVoxelSize?: number) => void; onSaveAsset?: (name: string, document: ModelDocument, voxelSize?: number) => Promise<void>; embedded?: boolean; active?: boolean; documentOwner?: string }
+const App: React.FC<SculptProps> = ({ initialDocument, initialDraftVoxelSize, onDocumentChange, onSaveAsset, embedded = false, active = true, documentOwner }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<VoxelEngine | null>(null);
   const externalLoad = useRef(false);
   const loadedOwner = useRef<string | undefined>(undefined);
+  const importedMeshVoxelSize = useRef<number | undefined>(undefined);
   const generationAbort = useRef<AbortController | null>(null);
   const changeCallback = useRef(onDocumentChange); changeCallback.current = onDocumentChange;
 
@@ -127,7 +129,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
 
     engineRef.current = engine;
     engine.onWeightSelection = setRigWeightSelection;
-    engine.onDocumentChange = document => { if (!externalLoad.current) changeCallback.current?.(document); };
+    engine.onDocumentChange = document => { if (!externalLoad.current) changeCallback.current?.(document, importedMeshVoxelSize.current); };
 
 
     if (settings.backgroundColor) engine.setBackgroundColor(settings.backgroundColor);
@@ -157,13 +159,14 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
 
   useEffect(() => {
     if (!initialDocument || !engineRef.current) return;
+    importedMeshVoxelSize.current = initialDraftVoxelSize ?? undefined;
     if (loadedOwner.current===documentOwner && JSON.stringify(engineRef.current.getModelDocument()) === JSON.stringify(initialDocument)) return;
     loadedOwner.current=documentOwner;
     generationAbort.current?.abort();
     externalLoad.current = true;
     try { engineRef.current.loadInitialModel(initialDocument.voxels, initialDocument.skeleton); }
     finally { externalLoad.current = false; }
-  }, [initialDocument, documentOwner]);
+  }, [initialDocument, initialDraftVoxelSize, documentOwner]);
   useEffect(()=>()=>{generationAbort.current?.abort();},[]);
   useEffect(() => { if (engineRef.current) { engineRef.current.active = active; if(active)engineRef.current.handleResize(); } }, [active]);
 
@@ -243,6 +246,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
   };
 
   const handleNewEmptyScene = () => {
+    importedMeshVoxelSize.current = undefined;
     engineRef.current?.loadInitialModel([]);
     setCurrentBaseModel('New Scene');
   };
@@ -257,6 +261,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
 
   const handleSelectCustomBuild = (model: SavedModel) => {
       if (engineRef.current) {
+          importedMeshVoxelSize.current = undefined;
           engineRef.current.loadInitialModel(model.data, model.skeleton ?? null);
           setCurrentBaseModel(model.name);
       }
@@ -310,7 +315,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
       setNameRequest({ title: embedded ? 'Save project asset' : 'Save model', initialValue: currentBaseModel, confirmLabel: 'Save model', onConfirm: async name => {
           if (!engineRef.current) throw new Error('The editor is not ready yet.');
           const document = engineRef.current.getModelDocument();
-          if (onSaveAsset) { await onSaveAsset(name, document); setSaveNotice(`Saved "${name}" in this project.`); return; }
+          if (onSaveAsset) { await onSaveAsset(name, document, importedMeshVoxelSize.current); setSaveNotice(`Saved "${name}" in this project.`); return; }
           const updated = [...customBuilds, { name, data: document.voxels, skeleton: document.skeleton }];
           try {
               localStorage.setItem('voxelBuilderCustomBuilds', JSON.stringify(updated));
@@ -361,6 +366,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
 
   const handleJsonImport = (rawJson: string) => {
     if (!engineRef.current) throw new Error('The editor is not ready yet.');
+    importedMeshVoxelSize.current = undefined;
     engineRef.current.importJsonData(rawJson);
     setCurrentBaseModel('Imported Model');
   };
@@ -591,6 +597,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
             }]);
 
             if (promptMode === 'create') {
+                importedMeshVoxelSize.current = undefined;
                 engineRef.current.loadInitialModel(voxelData);
                 setCustomBuilds(prev => [...prev, { name: prompt, data: voxelData }]);
                 setCurrentBaseModel(prompt);
@@ -652,6 +659,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
   const handleImageImport = async (file: File) => {
       if (engineRef.current) {
           try {
+          importedMeshVoxelSize.current = undefined;
           await engineRef.current.voxelizeImage(file);
           setCurrentBaseModel(file.name);
           } catch(e) {setSaveNotice(getErrorMessage(e,'Image import failed.'));}
@@ -665,8 +673,37 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
     return () => { if(engineRef.current!==engine||engine.documentRevision!==revision)throw new Error('Operation cancelled because the active model changed. Start it again for the current model.'); };
   }
 
-  const handleMeshImport = async (file: File) => {
+  async function importMeshObject(
+    object: Parameters<VoxelEngine['voxelizeMesh']>[0],
+    resolution: number | null,
+    clips: Parameters<VoxelEngine['voxelizeMesh']>[2] = [],
+  ) {
+    const engine = engineRef.current;
+    if (!engine) return undefined;
+    const previous = engine.getModelDocument();
+    const wasExternalLoad = externalLoad.current;
+    externalLoad.current = true;
+    let voxelSize: number | undefined;
+    try {
+      voxelSize = await engine.voxelizeMesh(object, resolution, clips);
+    } finally {
+      externalLoad.current = wasExternalLoad;
+    }
+    const document = engine.getModelDocument();
+    if (voxelSize === undefined && JSON.stringify(previous) === JSON.stringify(document)) return undefined;
+    importedMeshVoxelSize.current = voxelSize;
+    changeCallback.current?.(document, voxelSize);
+    return voxelSize;
+  }
+
+  const handleMeshImport = async (selectedFiles: File[]) => {
       if (!engineRef.current) return;
+      const modelFiles = selectedFiles.filter((candidate) => /\.(stl|gltf|glb|ply|fbx|obj)$/i.test(candidate.name));
+      if (modelFiles.length !== 1) {
+          setSaveNotice('Select one 3D model file. For glTF, include its referenced files or choose the containing folder.');
+          return;
+      }
+      const file = modelFiles[0];
       const checkOwner=captureImportOwner();
       const choice = await new Promise<string | null>(resolve=>setNameRequest({title:'Import 3D mesh',inputLabel:'Voxel resolution · auto, or 8–128',initialValue:'auto',confirmLabel:'Import mesh',onCancel:()=>resolve(null),onConfirm:value=>{
         if(value.toLowerCase()!=='auto'&&(!/^\d+$/.test(value)||Number(value)<8||Number(value)>128))throw new Error('Enter auto or a whole number from 8 to 128.');
@@ -691,14 +728,14 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
               const geometry = loader.parse(await file.arrayBuffer());
               const THREE = await import('three');
               const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
-              checkOwner(); await engineRef.current.voxelizeMesh(mesh, resolution);
+              checkOwner(); await importMeshObject(mesh, resolution);
           } else if (isPLY) {
               const { PLYLoader } = await import('three/addons/loaders/PLYLoader.js');
               const loader = new PLYLoader();
               const geometry = loader.parse(await file.arrayBuffer());
               const THREE = await import('three');
               const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
-              checkOwner(); await engineRef.current.voxelizeMesh(mesh, resolution);
+              checkOwner(); await importMeshObject(mesh, resolution);
           } else if (isFBX) {
               const { FBXLoader } = await import('three/addons/loaders/FBXLoader.js');
               const loader = new FBXLoader();
@@ -707,48 +744,64 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
                   const object = await new Promise<any>((resolve, reject) => {
                       loader.load(url, resolve, undefined, reject);
                   });
-                  checkOwner(); await engineRef.current.voxelizeMesh(object, resolution);
+                  checkOwner();
+                  await importMeshObject(object, resolution, object.animations ?? []);
               } finally {
                   URL.revokeObjectURL(url);
               }
           } else {
               const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-              const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
-              const loader = isGLTF ? new GLTFLoader() : new OBJLoader();
-              const url = URL.createObjectURL(file);
-              try {
-                  const result = await new Promise<any>((resolve, reject) => {
-                      loader.load(url, resolve, undefined, reject);
-                  });
-                  if (isGLTF) {
-                      let embeddedRaw: any[] | null = null;
-                      let embeddedSkeleton = null;
-                      const scene = result.scene;
-                      if (scene) {
-                          if (Array.isArray(scene.userData?.voxelData)) {
-                              embeddedRaw = scene.userData.voxelData;
-                              embeddedSkeleton = scene.userData.voxshopSkeleton ?? null;
-                          } else {
-                              scene.traverse((child: any) => {
-                                  if (!embeddedRaw && Array.isArray(child.userData?.voxelData)) {
-                                      embeddedRaw = child.userData.voxelData;
-                                      embeddedSkeleton = child.userData.voxshopSkeleton ?? null;
-                                  }
-                              });
-                          }
-                      }
-                      if (embeddedRaw) {
-                          checkOwner();
-                          engineRef.current.loadInitialModel(normalizeVoxels(embeddedRaw), embeddedSkeleton);
-                          setCurrentBaseModel(file.name);
-                          return;
+              let result: any;
+              if (isGLTF) {
+                  const THREE = await import('three');
+                  const resolver = createGltfFileResolver(file, selectedFiles);
+                  const manager = new THREE.LoadingManager();
+                  manager.setURLModifier(resolver.resolve);
+                  try {
+                      result = await new GLTFLoader(manager).parseAsync(await file.arrayBuffer(), resolver.baseUrl);
+                  } finally {
+                      resolver.dispose();
+                  }
+              } else {
+                  const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
+                  const loader = new OBJLoader();
+                  const url = URL.createObjectURL(file);
+                  try {
+                      result = await new Promise<any>((resolve, reject) => {
+                          loader.load(url, resolve, undefined, reject);
+                      });
+                  } finally {
+                      URL.revokeObjectURL(url);
+                  }
+              }
+              if (isGLTF) {
+                  let embeddedRaw: any[] | null = null;
+                  let embeddedSkeleton = null;
+                  const scene = result.scene;
+                  if (scene) {
+                      if (Array.isArray(scene.userData?.voxelData)) {
+                          embeddedRaw = scene.userData.voxelData;
+                          embeddedSkeleton = scene.userData.voxshopSkeleton ?? null;
+                      } else {
+                          scene.traverse((child: any) => {
+                              if (!embeddedRaw && Array.isArray(child.userData?.voxelData)) {
+                                  embeddedRaw = child.userData.voxelData;
+                                  embeddedSkeleton = child.userData.voxshopSkeleton ?? null;
+                              }
+                          });
                       }
                   }
-                  const object = result.scene || result;
-                  checkOwner(); await engineRef.current.voxelizeMesh(object, resolution);
-              } finally {
-                  URL.revokeObjectURL(url);
+                  if (embeddedRaw) {
+                      checkOwner();
+                      importedMeshVoxelSize.current = undefined;
+                      engineRef.current.loadInitialModel(normalizeVoxels(embeddedRaw), embeddedSkeleton);
+                      setCurrentBaseModel(file.name);
+                      return;
+                  }
               }
+              const object = result.scene || result;
+              checkOwner();
+              await importMeshObject(object, resolution, result.animations ?? object.animations ?? []);
       }
           setCurrentBaseModel(file.name);
       } catch (e) {
@@ -763,6 +816,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
       try {
           const data = engineRef.current.importVOX(await file.arrayBuffer());
           checkOwner();
+          importedMeshVoxelSize.current = undefined;
           engineRef.current.loadInitialModel(data);
           setCurrentBaseModel(file.name);
       } catch (e: unknown) {
@@ -776,6 +830,7 @@ const App: React.FC<SculptProps> = ({ initialDocument, onDocumentChange, onSaveA
       try {
           const data = engineRef.current.importQB(await file.arrayBuffer());
           checkOwner();
+          importedMeshVoxelSize.current = undefined;
           engineRef.current.loadInitialModel(data);
           setCurrentBaseModel(file.name);
       } catch (e: unknown) {

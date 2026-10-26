@@ -115,9 +115,44 @@ async function prepareResources() {
   await rm(stageRoot, { recursive: true, force: true });
 }
 
+async function prepareWindowsGamePlayer() {
+  if (process.platform !== 'win32') return;
+  const playerRoot = path.join(projectRoot, 'desktop', 'game-player');
+  const playerTarget = path.join(desktopRoot, 'game-player-target');
+  const playerResource = path.join(resourcesRoot, 'game-player');
+  const tauriCli = path.join(projectRoot, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+  await mkdir(playerResource, { recursive: true });
+
+  const notices = spawnSync(
+    process.execPath,
+    [path.join(projectRoot, 'scripts', 'collect-game-player-licenses.mjs')],
+    { cwd: projectRoot, stdio: 'inherit' },
+  );
+  if (notices.error) throw notices.error;
+  if (notices.status !== 0)
+    throw new Error(`Windows game-player license collection failed with status ${notices.status}.`);
+
+  const build = spawnSync(process.execPath, [tauriCli, 'build', '--no-bundle', '--ci'], {
+    cwd: playerRoot,
+    env: { ...process.env, CARGO_TARGET_DIR: playerTarget },
+    stdio: 'inherit',
+  });
+  if (build.error) throw build.error;
+  if (build.status !== 0)
+    throw new Error(`Windows game-player build failed with status ${build.status ?? 'unknown'}.`);
+
+  const executable = path.join(playerTarget, 'release', 'voxshop-game-player.exe');
+  const bundledExecutable = path.join(playerResource, 'voxshop-game-player.exe');
+  await copyFile(executable, bundledExecutable);
+  const { size } = await stat(bundledExecutable);
+  if (size < 1024) throw new Error('The built Windows game player is unexpectedly small.');
+  console.log(`Prepared generic Windows game player (${(size / 1024 / 1024).toFixed(1)} MiB).`);
+}
+
 const sidecar = await prepareSidecar();
 if (!sidecarOnly) {
   await prepareResources();
+  await prepareWindowsGamePlayer();
   const bootstrap = spawnSync(
     process.execPath,
     [

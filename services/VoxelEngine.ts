@@ -1,6 +1,6 @@
 import { encodeVOX, encodeQB, encodeMinecraft, decodeVOX, decodeQB, decodeMinecraft } from './voxelFormats';
 import { loadRasterImage, imageVoxels, textVoxels } from './rasterVoxelization';
-import { voxelizeMesh as voxelizeMeshData } from './meshVoxelization';
+import { voxelizeMeshWithMetadata, voxelizeMeshWithRig } from './meshVoxelization';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -130,6 +130,7 @@ export class VoxelEngine {
   private rigGroup: THREE.Group | null = null;
   private boneGroups: Record<string, THREE.Bone> = {};
   private bonePivots: Record<string, THREE.Vector3> = {};
+  private boneRestRotations: Record<string, THREE.Quaternion> = {};
   private rigSkeleton: THREE.Skeleton | null = null;
   private mixer: THREE.AnimationMixer | null = null;
   private clock = new THREE.Clock();
@@ -484,9 +485,19 @@ export class VoxelEngine {
     this.loadInitialModel(textVoxels(text, fontSize, color));
   }
 
-  public async voxelizeMesh(object: THREE.Object3D, resolution: number | null = null) {
-    const voxelData = voxelizeMeshData(object, resolution);
-    if (voxelData) this.loadInitialModel(voxelData);
+  public async voxelizeMesh(
+    object: THREE.Object3D,
+    resolution: number | null = null,
+    clips: THREE.AnimationClip[] = [],
+  ): Promise<number | undefined> {
+    const rigged = voxelizeMeshWithRig(object, resolution, clips);
+    if (rigged) {
+      this.loadInitialModel(rigged.voxels, rigged.skeleton);
+      return rigged.voxelSize;
+    }
+    const converted = voxelizeMeshWithMetadata(object, resolution);
+    if (converted?.voxels) this.loadInitialModel(converted.voxels);
+    return converted?.voxels ? converted.voxelSize : undefined;
   }
 
   public resample(scaleFactor: number) {
@@ -1366,12 +1377,17 @@ export class VoxelEngine {
           if (keyframes.some((k) => k.rot)) {
             const values: number[] = [];
             keyframes.forEach((k) => {
-              const quat = new THREE.Quaternion().setFromEuler(
-                new THREE.Euler(k.rot?.[0] || 0, k.rot?.[1] || 0, k.rot?.[2] || 0),
+              const quat = (this.boneRestRotations[boneName]?.clone() ?? new THREE.Quaternion()).multiply(
+                new THREE.Quaternion().setFromEuler(
+                  new THREE.Euler(k.rot?.[0] || 0, k.rot?.[1] || 0, k.rot?.[2] || 0),
+                ),
               );
               values.push(quat.x, quat.y, quat.z, quat.w);
             });
-            tracks.push(new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values));
+            const track = new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, values);
+            if (keyframes.every((keyframe) => keyframe.interpolation === 'step'))
+              track.setInterpolation(THREE.InterpolateDiscrete);
+            tracks.push(track);
           }
           if (keyframes.some((k) => k.pos)) {
             const values: number[] = [];
@@ -2135,23 +2151,53 @@ export class VoxelEngine {
     this.rigGroup = new THREE.Group();
     this.boneGroups = {};
     this.bonePivots = {};
+    this.boneRestRotations = {};
 
     const modelBounds = new THREE.Box3();
     this.voxels.forEach((voxel) => modelBounds.expandByPoint(new THREE.Vector3(voxel.x, voxel.y, voxel.z)));
     const modelCenter = modelBounds.getCenter(new THREE.Vector3());
     const pivots: Record<string, THREE.Vector3> = {};
-    skeletonDef.bones.forEach((bDef) => {
-      const bVoxels = this.voxels.filter((v) => v.bone === bDef.name);
+    const worldRotations: Record<string, THREE.Quaternion> = {};
+    const boneDefs = new Map(skeletonDef.bones.map((bone) => [bone.name, bone]));
+    const worldPivot = (name: string): THREE.Vector3 => {
+      const prior = pivots[name];
+      if (prior) return prior;
+      const definition = boneDefs.get(name)!;
+      if (definition.bindPosition) {
+        const parent = definition.parent ? worldPivot(definition.parent) : null;
+        const parentRotation = definition.parent ? worldRotations[definition.parent] : new THREE.Quaternion();
+        const localRotation = new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(...(definition.bindRotation ?? [0, 0, 0])),
+        );
+        const position = new THREE.Vector3(...definition.bindPosition);
+        if (parent) position.applyQuaternion(parentRotation).add(parent);
+        pivots[name] = position;
+        worldRotations[name] = parentRotation.clone().multiply(localRotation);
+        return position;
+      }
+      const bVoxels = this.voxels.filter((v) => v.bone === name);
       const box = new THREE.Box3();
       bVoxels.forEach((v) => box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z)));
       const pivot = bVoxels.length ? box.getCenter(new THREE.Vector3()) : modelCenter.clone();
-      if (bVoxels.length && bDef.pivotType === 'bottom') pivot.y = box.min.y;
-      else if (bVoxels.length && bDef.pivotType === 'top') pivot.y = box.max.y;
-      else if (bVoxels.length && bDef.pivotType === 'left') pivot.x = box.min.x;
-      else if (bVoxels.length && bDef.pivotType === 'right') pivot.x = box.max.x;
-      else if (bVoxels.length && bDef.pivotType === 'front') pivot.z = box.max.z;
-      else if (bVoxels.length && bDef.pivotType === 'back') pivot.z = box.min.z;
-      pivots[bDef.name] = pivot;
+      if (bVoxels.length && definition.pivotType === 'bottom') pivot.y = box.min.y;
+      else if (bVoxels.length && definition.pivotType === 'top') pivot.y = box.max.y;
+      else if (bVoxels.length && definition.pivotType === 'left') pivot.x = box.min.x;
+      else if (bVoxels.length && definition.pivotType === 'right') pivot.x = box.max.x;
+      else if (bVoxels.length && definition.pivotType === 'front') pivot.z = box.max.z;
+      else if (bVoxels.length && definition.pivotType === 'back') pivot.z = box.min.z;
+      pivots[name] = pivot;
+      const parentRotation = definition.parent ? worldRotations[definition.parent] : undefined;
+      worldRotations[name] = parentRotation
+        ? parentRotation
+            .clone()
+            .multiply(
+              new THREE.Quaternion().setFromEuler(new THREE.Euler(...(definition.bindRotation ?? [0, 0, 0]))),
+            )
+        : new THREE.Quaternion().setFromEuler(new THREE.Euler(...(definition.bindRotation ?? [0, 0, 0])));
+      return pivot;
+    };
+    skeletonDef.bones.forEach((bDef) => {
+      const pivot = worldPivot(bDef.name);
       this.bonePivots[bDef.name] = pivot.clone();
       const bone = new THREE.Bone();
       bone.name = bDef.name;
@@ -2167,11 +2213,15 @@ export class VoxelEngine {
       allBones.push(bone);
       if (bDef.parent && this.boneGroups[bDef.parent]) {
         this.boneGroups[bDef.parent].add(bone);
-        bone.position.subVectors(pivots[bDef.name], pivots[bDef.parent]);
+        if (bDef.bindPosition) bone.position.set(...bDef.bindPosition);
+        else bone.position.subVectors(pivots[bDef.name], pivots[bDef.parent]);
       } else {
         this.rigGroup!.add(bone);
-        bone.position.copy(pivots[bDef.name]);
+        if (bDef.bindPosition) bone.position.set(...bDef.bindPosition);
+        else bone.position.copy(pivots[bDef.name]);
       }
+      if (bDef.bindRotation) bone.rotation.set(...bDef.bindRotation);
+      this.boneRestRotations[bDef.name] = bone.quaternion.clone();
     });
 
     this.scene.add(this.rigGroup);
@@ -2296,12 +2346,17 @@ export class VoxelEngine {
       if (kfs.some((k) => k.rot)) {
         const vals: number[] = [];
         kfs.forEach((k) => {
-          const q = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler(k.rot?.[0] || 0, k.rot?.[1] || 0, k.rot?.[2] || 0),
+          const q = (this.boneRestRotations[boneName]?.clone() ?? new THREE.Quaternion()).multiply(
+            new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(k.rot?.[0] || 0, k.rot?.[1] || 0, k.rot?.[2] || 0),
+            ),
           );
           vals.push(q.x, q.y, q.z, q.w);
         });
-        tracks.push(new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, vals));
+        const track = new THREE.QuaternionKeyframeTrack(`${boneName}.quaternion`, times, vals);
+        if (kfs.every((keyframe) => keyframe.interpolation === 'step'))
+          track.setInterpolation(THREE.InterpolateDiscrete);
+        tracks.push(track);
       }
       if (kfs.some((k) => k.pos)) {
         const vals: number[] = [];
@@ -2309,7 +2364,10 @@ export class VoxelEngine {
         kfs.forEach((k) =>
           vals.push(base.x + (k.pos?.[0] || 0), base.y + (k.pos?.[1] || 0), base.z + (k.pos?.[2] || 0)),
         );
-        tracks.push(new THREE.VectorKeyframeTrack(`${boneName}.position`, times, vals));
+        const track = new THREE.VectorKeyframeTrack(`${boneName}.position`, times, vals);
+        if (kfs.every((keyframe) => keyframe.interpolation === 'step'))
+          track.setInterpolation(THREE.InterpolateDiscrete);
+        tracks.push(track);
       }
     });
     const clip = new THREE.AnimationClip(animName, animDef.duration, tracks);
@@ -2353,6 +2411,7 @@ export class VoxelEngine {
       this.rigGroup = null;
       this.boneGroups = {};
       this.bonePivots = {};
+      this.boneRestRotations = {};
       this.rigSkeleton = null;
     }
   }

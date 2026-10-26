@@ -18,7 +18,7 @@ VoxShop grows from a voxel asset workshop into a voxel game-authoring studio. Th
 
 ### Alpha limits
 
-Linux packages are deferred. Broader hardware/input-device coverage and real-internet multiplayer testing remain ongoing. Distant terrain and smooth-heightfield collision use documented approximations. Gameplay authoring uses supported components/events/actions; arbitrary user script execution and public matchmaking are not supplied. See [current limits](skills/ENGINE_LIMITS.md).
+No Linux package is included in this release download. On-demand CI builds DEB and AppImage artifacts on Ubuntu 22.04; this does not certify every Linux distribution, compositor or GPU. Broader hardware/input-device coverage and real-internet multiplayer testing remain ongoing. Distant terrain and smooth-heightfield collision use documented approximations. Gameplay authoring uses supported components/events/actions; arbitrary user script execution and public matchmaking are not supplied. See [current limits](skills/ENGINE_LIMITS.md).
 
 ### Updating
 

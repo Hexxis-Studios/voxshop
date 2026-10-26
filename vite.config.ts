@@ -8,6 +8,20 @@ export default defineConfig({
     port: clientPort,
     strictPort: true,
     host: '127.0.0.1',
+    watch: {
+      ignored: [
+        '**/.voxshop/**',
+        '**/src-tauri/**',
+        '**/.github/**',
+        '**/.agents/**',
+        '**/tests/**',
+        '**/server/**',
+        '**/mcp/**',
+        '**/scripts/**',
+        '**/docs/**',
+        '**/skills/**',
+      ],
+    },
     proxy: {
       '/api': { target: `http://127.0.0.1:${process.env.VOXSHOP_PORT ?? 4269}`, changeOrigin: true },
     },

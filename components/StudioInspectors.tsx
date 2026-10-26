@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Asset, type ProjectDocument, validateProject } from '../services/projectDocument';
 import { localApi } from '../services/localApi';
 import { RigEditor } from './RigEditor';
-import { NumberField, VectorField } from './InspectorFields';
+import { DraftRecovery, NumberField, VectorField } from './InspectorFields';
 
 export function AssetInspector({
   asset,
@@ -25,11 +25,14 @@ export function AssetInspector({
 }) {
   const [preview, setPreview] = useState(''),
     [draft, setDraft] = useState(asset),
-    [rig, setRig] = useState(''),
+    [rig, setRig] = useState(JSON.stringify(asset.rig, null, 2)),
     [dirty, setDirty] = useState(false),
     [error, setError] = useState('');
   const base = useRef(project.revision),
     id = useRef(asset.id);
+  const rigTextHasEdits = rig !== JSON.stringify(draft.rig, null, 2),
+    hasLocalEdits = dirty || rigTextHasEdits,
+    draftConflict = hasLocalEdits && project.revision !== base.current;
   const gridSize = useMemo(() => {
     if (!draft.model.voxels.length) return [0, 0, 0];
     const min = [Infinity, Infinity, Infinity];
@@ -44,7 +47,7 @@ export function AssetInspector({
     return max.map((value, axis) => value - min[axis] + 1);
   }, [draft.model.voxels]);
   useEffect(() => {
-    if (id.current !== asset.id || !dirty) {
+    if (id.current !== asset.id || !hasLocalEdits) {
       id.current = asset.id;
       setDraft(asset);
       setRig(JSON.stringify(asset.rig, null, 2));
@@ -52,7 +55,7 @@ export function AssetInspector({
       setDirty(false);
       setError('');
     }
-  }, [asset, project.revision]);
+  }, [asset, project.revision, hasLocalEdits]);
   useEffect(() => {
     let disposed = false,
       url = '';
@@ -164,7 +167,22 @@ export function AssetInspector({
             {error}
           </p>
         )}
-        <button disabled={!dirty} className="studio-primary">
+        {draftConflict && (
+          <DraftRecovery
+            kind="asset"
+            baseRevision={base.current}
+            currentRevision={project.revision}
+            draft={{ asset: draft, rigText: rig }}
+            onReload={() => {
+              setDraft(asset);
+              setRig(JSON.stringify(asset.rig, null, 2));
+              base.current = project.revision;
+              setDirty(false);
+              setError('');
+            }}
+          />
+        )}
+        <button disabled={!dirty || draftConflict} className="studio-primary">
           Apply asset changes
         </button>
       </form>

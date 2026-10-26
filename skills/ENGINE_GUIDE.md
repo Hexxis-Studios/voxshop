@@ -6,11 +6,11 @@ Read `voxshop://agent/workflow` before authoring, then discover `tools/list` and
 
 1. Inspect the project, scene, active player and revision. Use compact inspection to avoid downloading large voxel arrays.
 2. Generate or import editable assets. Terrain-cell size and each model's voxel size are independent; tune them in physical meters.
-3. Place assets and compose supported components: player controls, colliders, rigid bodies, interactables, items/recipes, rules, objectives, prefabs, HUDs and campaign transitions.
+3. Place assets and compose supported components: player controls, colliders, rigid bodies, interactables, items/recipes, rules, objectives, prefabs, HUDs and campaign transitions. Rule `set`/`add` actions accept bounded deterministic expressions over game state; use the discovered action schema rather than JavaScript or ad hoc fields.
 4. Apply small atomic batches using stable IDs, the current revision and a unique retry ID. On conflict, inspect again and preserve manual work. Reuse a retry ID only with identical arguments.
-5. Use articulated animation presets as starting points. Tune keys, blending, markers and sockets for the actual model. Imported rigs and clothing need their own joint mappings and fitting.
+5. Use articulated animation presets as starting points. Tune keys, blending, markers and sockets for the actual model. Self-contained GLB/glTF and FBX imports can preserve skin weights and compatible animation clips for a supported shared skeleton, but imported geometry is voxelized and needs its own deformation review and fitting.
 6. Run bounded simulation playtests, then inspect real connected-editor PNGs before accepting visual changes. Capture multiple angles and motion frames; inspect equipment deformation, lighting, collisions and player-facing UI.
-7. Stop Play before editing. Save a portable project backup and export a self-contained browser game; Windows game packaging is a separate build step.
+7. Stop Play before editing. Save a portable project backup. Export a self-contained browser game, or use `game_build` with `target: "windows-exe"` when the editor bundles its prebuilt Windows player; this does not require a Rust build toolchain and the game requires WebView2 Evergreen on Windows.
 
 Use `viewport_clients` to find a connected editor. An empty list means no visual client is attached. `viewport_observe` can move the camera, enter Play, advance bounded input and return real PNGs and state. Check project identity/revision; wait for a newly applied revision to load before capturing. Static previews and simulation assertions do not establish visual quality or frame rate.
 

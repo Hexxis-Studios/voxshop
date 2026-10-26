@@ -118,6 +118,16 @@ export function cloneSkeleton(value: unknown): SkeletonDef | null {
     ) {
       throw new Error('Invalid skeleton bone.');
     }
+    for (const channel of ['bindPosition', 'bindRotation']) {
+      const vector = bone[channel];
+      if (
+        vector !== undefined &&
+        (!Array.isArray(vector) ||
+          vector.length !== 3 ||
+          vector.some((n) => typeof n !== 'number' || !Number.isFinite(n)))
+      )
+        throw new Error('Invalid skeleton bind transform.');
+    }
     parents.set(bone.name, bone.parent as string | null);
   }
   for (const name of parents.keys()) {
@@ -163,6 +173,11 @@ export function cloneSkeleton(value: unknown): SkeletonDef | null {
           )
             throw new Error('Invalid animation vector.');
         }
+        if (
+          frame.interpolation !== undefined &&
+          !['linear', 'smooth', 'step'].includes(frame.interpolation as string)
+        )
+          throw new Error('Invalid animation interpolation.');
       }
     }
   }

@@ -303,8 +303,8 @@ register(
 );
 register(
   'game_build',
-  'Build one scene into a self-contained HTML game with only its referenced assets. No editor, MCP, AI, keys or network required to play. Returns a job and artifact path.',
-  { projectId, sceneId: idSchema },
+  'Build a game starting at one scene with its reachable scenes and referenced assets. Default target html is a self-contained HTML game that runs offline in a browser. Target windows-exe exports a standalone Windows player when this editor bundles that capability; WebView2 Evergreen is required to play. No editor, MCP or AI account is required by exported games. Returns a job and artifact path.',
+  { projectId, sceneId: idSchema, target: z.enum(['html', 'windows-exe']).optional() },
   async ({ projectId: id, ...body }) => result(await api(`/api/projects/${id}/build`, body)),
 );
 register(

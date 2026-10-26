@@ -32,6 +32,7 @@ import { GpuTimerQueries } from './gpuTimerQueries';
 import { OCCLUSION_QUERY_FRAME_BUDGET } from './occlusionQueries';
 import type { PhysicsQueryResult } from './RapierPhysics';
 import { MultiplayerGameConnection, type MultiplayerGameplayInput } from './MultiplayerGameConnection';
+import { loadMultiplayerResumeSession } from './MultiplayerClient';
 import type { MultiplayerConnectionInfo, MultiplayerRoomOptions } from './multiplayerControls';
 import {
   createWorldCellSampler,
@@ -1192,11 +1193,11 @@ export class GameViewport {
       }
     );
   }
-  private disconnectMultiplayer() {
+  private disconnectMultiplayer(pageExit = false) {
     const connection = this.multiplayer;
     this.multiplayer = undefined;
     this.remoteTopology = '';
-    if (connection) void connection.close().catch(() => {});
+    if (connection) void (pageExit ? connection.disconnectForPageExit() : connection.close()).catch(() => {});
   }
   async joinMultiplayerRoom(options: MultiplayerRoomOptions) {
     await this.leaveMultiplayerRoom();
@@ -1248,6 +1249,17 @@ export class GameViewport {
       }
       throw cause;
     }
+  }
+  async resumeMultiplayerRoom() {
+    const projectBinding = {
+      projectId: this.project.id,
+      revision: this.project.revision,
+      sceneId: this.project.activeSceneId,
+    };
+    const options = loadMultiplayerResumeSession(projectBinding);
+    if (!options) return false;
+    await this.joinMultiplayerRoom(options);
+    return true;
   }
   async leaveMultiplayerRoom() {
     const connection = this.multiplayer;
@@ -1823,7 +1835,7 @@ export class GameViewport {
     if (scheduleNextFrame) this.scheduleFrame();
   };
   dispose() {
-    this.disconnectMultiplayer();
+    this.disconnectMultiplayer(true);
     this.session?.dispose();
     this.session = null;
     this.disposed = true;

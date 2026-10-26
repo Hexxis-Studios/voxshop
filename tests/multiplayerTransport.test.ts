@@ -10,7 +10,7 @@ import WebSocket from 'ws';
 import { createApp } from '../server/app';
 import { MultiplayerGateway } from '../server/multiplayer';
 import type { ServerMessage } from '../services/multiplayerProtocol';
-import { MultiplayerClient } from '../runtime/MultiplayerClient';
+import { loadMultiplayerResumeSession, MultiplayerClient } from '../runtime/MultiplayerClient';
 import { nodeSchema } from '../services/projectDocument';
 
 function open(socket: WebSocket) {
@@ -91,6 +91,54 @@ async function reservePort() {
   if (!address || typeof address === 'string') throw new Error('Expected an ephemeral TCP port.');
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
+}
+
+function installSessionStorageMock() {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+  const values = new Map<string, string>();
+  const storage = {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key: string) {
+      return values.get(key) ?? null;
+    },
+    key(index: number) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+    setItem(key: string, value: string) {
+      values.set(key, String(value));
+    },
+  } satisfies Storage;
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: storage,
+  });
+  return {
+    storage,
+    restore() {
+      if (original) Object.defineProperty(globalThis, 'sessionStorage', original);
+      else Reflect.deleteProperty(globalThis, 'sessionStorage');
+    },
+  };
+}
+
+function installMultiplayerClientWebSocket() {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: WebSocket,
+  });
+  return () => {
+    if (original) Object.defineProperty(globalThis, 'WebSocket', original);
+    else Reflect.deleteProperty(globalThis, 'WebSocket');
+  };
 }
 
 test('multiplayer gateway refuses plaintext non-loopback binds', () => {
@@ -177,6 +225,190 @@ test('browser-native multiplayer client joins, sends input, receives an authorit
     assert.equal(gateway.listRooms()[0]?.playerCount, 0, 'Explicit leave must prevent automatic rejoin.');
   } finally {
     await client.leave();
+    await gateway.close();
+  }
+});
+
+test('opted-in tab session resumes a fresh client after renderer exit and explicit Leave clears it', async () => {
+  const gateway = new MultiplayerGateway({ host: '127.0.0.1', port: 0 });
+  const browser = installSessionStorageMock();
+  const restoreWebSocket = installMultiplayerClientWebSocket();
+  let first: MultiplayerClient | undefined;
+  let reloaded: MultiplayerClient | undefined;
+  try {
+    const websocketUrl = await gateway.listen();
+    const room = gateway.createRoom(2);
+    const projectBinding = { projectId: 'resume-game', revision: 3, sceneId: 'opening' };
+    first = new MultiplayerClient({
+      websocketUrl,
+      gameId: room.gameId,
+      credential: room.credential,
+      resumeAfterReload: true,
+      projectBinding,
+    });
+    const originalJoin = await first.connect();
+    const originalToken = first.resumeToken;
+    assert.ok(originalToken);
+    const saved = loadMultiplayerResumeSession(projectBinding);
+    assert.ok(saved);
+    assert.equal(saved.credential, undefined, 'The original room secret is not persisted.');
+    assert.equal(saved.resumeCredential, originalToken);
+    assert.ok(
+      [...Array(browser.storage.length)].every((_, index) => {
+        const key = browser.storage.key(index)!;
+        return !key.includes(room.credential) && !browser.storage.getItem(key)!.includes(room.credential);
+      }),
+      'Neither storage keys nor resume data contain the room secret.',
+    );
+
+    await first.disconnectForPageExit();
+    await waitFor(() => gateway.listRooms()[0]?.playerCount === 0);
+    assert.equal(gateway.listRooms()[0]?.reservedPlayerCount, 1);
+
+    reloaded = new MultiplayerClient(saved);
+    const resumedJoin = await reloaded.connect();
+    assert.equal(resumedJoin.playerId, originalJoin.playerId);
+    assert.notEqual(resumedJoin.resumeCredential, originalToken);
+    assert.equal(gateway.listRooms()[0]?.playerCount, 1);
+    assert.equal(gateway.listRooms()[0]?.reservedPlayerCount, 0);
+
+    await reloaded.leave();
+    assert.equal(loadMultiplayerResumeSession(projectBinding), undefined);
+    assert.equal(gateway.listRooms()[0]?.playerCount, 0);
+    assert.equal(gateway.listRooms()[0]?.reservedPlayerCount, 0);
+  } finally {
+    await first?.leave();
+    await reloaded?.leave();
+    restoreWebSocket();
+    browser.restore();
+    await gateway.close();
+  }
+});
+
+test('explicit Leave during an opted-in join ignores a queued resume token', async () => {
+  const browser = installSessionStorageMock();
+  const originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+  let joinSent!: () => void;
+  const joinWasSent = new Promise<void>((resolve) => (joinSent = resolve));
+
+  class PendingJoinWebSocket extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    readyState = PendingJoinWebSocket.CONNECTING;
+    private joinedMessage = '';
+
+    constructor(_url: string | URL) {
+      super();
+      queueMicrotask(() => {
+        this.readyState = PendingJoinWebSocket.OPEN;
+        this.dispatchEvent(new Event('open'));
+      });
+    }
+
+    send(serialized: string) {
+      const message = JSON.parse(serialized);
+      if (message.type !== 'join') return;
+      this.joinedMessage = JSON.stringify({
+        version: 1,
+        type: 'joined',
+        gameId: message.gameId,
+        playerId: 'player-1',
+        resumeCredential: 'R'.repeat(43),
+        nextInputSequence: 0,
+      });
+      joinSent();
+    }
+
+    close() {
+      this.readyState = PendingJoinWebSocket.CLOSING;
+      if (this.joinedMessage)
+        this.dispatchEvent(Object.assign(new Event('message'), { data: this.joinedMessage }));
+      this.readyState = PendingJoinWebSocket.CLOSED;
+      this.dispatchEvent(new Event('close'));
+    }
+  }
+
+  Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: PendingJoinWebSocket });
+  const projectBinding = { projectId: 'leave-race-game', revision: 1, sceneId: 'main' };
+  const client = new MultiplayerClient({
+    websocketUrl: 'ws://127.0.0.1:4270/multiplayer',
+    gameId: 'leave-race-room',
+    credential: 'C'.repeat(43),
+    resumeAfterReload: true,
+    projectBinding,
+  });
+  const connecting = client.connect();
+  try {
+    await joinWasSent;
+    await client.leave();
+    await connecting.catch(() => {});
+    assert.equal(loadMultiplayerResumeSession(projectBinding), undefined);
+  } finally {
+    await client.leave();
+    if (originalWebSocket) Object.defineProperty(globalThis, 'WebSocket', originalWebSocket);
+    else Reflect.deleteProperty(globalThis, 'WebSocket');
+    browser.restore();
+  }
+});
+
+test('expired tab resume token is rejected and removed from session storage', async () => {
+  const gateway = new MultiplayerGateway({ host: '127.0.0.1', port: 0 });
+  const browser = installSessionStorageMock();
+  const restoreWebSocket = installMultiplayerClientWebSocket();
+  const originalNow = Date.now;
+  let client: MultiplayerClient | undefined;
+  try {
+    const websocketUrl = await gateway.listen();
+    const room = gateway.createRoom(1);
+    const projectBinding = { projectId: 'expired-game', revision: 4, sceneId: 'start' };
+    client = new MultiplayerClient({
+      websocketUrl,
+      gameId: room.gameId,
+      credential: room.credential,
+      resumeAfterReload: true,
+      projectBinding,
+    });
+    await client.connect();
+    let now = originalNow();
+    Date.now = () => now;
+    await client.disconnectForPageExit();
+    await waitFor(() => gateway.listRooms()[0]?.reservedPlayerCount === 1);
+    now += 60_001;
+    const saved = loadMultiplayerResumeSession(projectBinding);
+    assert.ok(saved);
+    const expiredClient = new MultiplayerClient(saved);
+    await assert.rejects(expiredClient.connect(), /invalid-credential/);
+    assert.equal(loadMultiplayerResumeSession(projectBinding), undefined);
+    await expiredClient.leave();
+  } finally {
+    Date.now = originalNow;
+    await client?.leave();
+    restoreWebSocket();
+    browser.restore();
+    await gateway.close();
+  }
+});
+
+test('page exit without resume opt-in explicitly leaves the multiplayer room', async () => {
+  const gateway = new MultiplayerGateway({ host: '127.0.0.1', port: 0 });
+  const browser = installSessionStorageMock();
+  const restoreWebSocket = installMultiplayerClientWebSocket();
+  let client: MultiplayerClient | undefined;
+  try {
+    const websocketUrl = await gateway.listen();
+    const room = gateway.createRoom(1);
+    client = new MultiplayerClient({ websocketUrl, gameId: room.gameId, credential: room.credential });
+    await client.connect();
+    await client.disconnectForPageExit();
+    assert.equal(gateway.listRooms()[0]?.playerCount, 0);
+    assert.equal(gateway.listRooms()[0]?.reservedPlayerCount, 0);
+    assert.equal(browser.storage.length, 0);
+  } finally {
+    await client?.leave();
+    restoreWebSocket();
+    browser.restore();
     await gateway.close();
   }
 });

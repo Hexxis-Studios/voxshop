@@ -19,8 +19,10 @@ The build prepares the production editor, Node service, MCP guidance and require
 
 ## Game player
 
-Export an HTML game, then run `npm run desktop:game:build -- <game.html>`. This produces a game-specific Windows installer. Its player embeds the HTML and runtime without the editor, Node sidecar or MCP broker. See [Windows game export](windows-game-export.md).
+The installed Windows editor includes a prebuilt player. Select **Windows EXE** beside **Export game** to create a standalone game without installing Node.js or a Rust toolchain, or compiling the player from source. Browser HTML is also supported. Developers can additionally build a game-specific installer from an HTML export. See [Windows game export](windows-game-export.md).
 
 ## Linux
 
-The architecture retains Linux support, but current packages are Windows-only. Linux builds require that platform's matching Node runtime and WebKitGTK 4.1 development packages.
+The on-demand Linux package workflow builds DEB and AppImage artifacts on Ubuntu 22.04 and runs the packaged sidecar/MCP check. It also installs the DEB and checks the editor viewport in an Xvfb software-rendered session. These are CI artifacts, not downloads in the current public release; the workflow does not establish compatibility with every distribution, compositor or GPU.
+
+Source builds require a matching Linux Node.js runtime, Rust toolchain and WebKitGTK 4.1 development packages. The repository's on-demand CI workflow runs the package and smoke checks described above.

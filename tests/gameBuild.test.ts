@@ -127,11 +127,13 @@ test('standalone exports contain only selected scene assets, embedded runtime, s
     p = applyProjectOperations(p, [
       { type: 'asset.variant', sourceId: 'hero', id: 'unused-variant', name: 'Unused' },
       { type: 'project.rename', name: 'Safe </script><img src=x> title' },
+      { type: 'editor.set', draft: p.assets[0].model, draftVoxelSize: 0.125 },
     ]);
     const game = exportProject(p, 'main');
     assert.ok(!game.assets.some((a) => a.id === 'unused-variant'));
     assert.ok(game.assets.every((a) => !a.recipe && !a.variantOf));
     assert.equal(game.editorDraft, null);
+    assert.equal(game.editorDraftVoxelSize, null);
     const result = await buildGame(p, 'main', { root: process.cwd(), directory });
     const html = await fs.readFile(result.path, 'utf8');
     assert.equal(result.sha256, createHash('sha256').update(html).digest('hex'));
@@ -142,6 +144,9 @@ test('standalone exports contain only selected scene assets, embedded runtime, s
       html,
       /id="multiplayer-credential" type="password" maxlength="43" required autocomplete="off"/,
     );
+    assert.match(html, /id="multiplayer-resume-after-reload" type="checkbox"/);
+    assert.match(html, /Resume this player after a reload in this tab/);
+    assert.match(html, /Room credentials stay in memory/);
     assert.match(html, /Offline\. Multiplayer is optional\./);
     assert.doesNotMatch(html, /id="multiplayer-(?:endpoint|room-id|credential)"[^>]*value=/);
     assert.match(html, /worker-src blob:/);

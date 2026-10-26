@@ -10,6 +10,7 @@ test('recovery keeps project ownership, preserves newer edits against stale writ
     baseRevision: 4,
     updatedAt: 10,
     document: createModelDocument([{ x: 0, y: 0, z: 0, color: 0 }]),
+    draftVoxelSize: 0.14498056769728357,
   };
   const newer = {
     ...first,
@@ -20,6 +21,7 @@ test('recovery keeps project ownership, preserves newer edits against stale writ
   await writeRecovery(first);
   await writeRecovery({ ...first, projectId: 'two' });
   assert.deepEqual(await readRecovery('one'), newer);
+  assert.equal((await readRecovery('one'))?.draftVoxelSize, 0.14498056769728357);
   await clearRecovery('one', 10);
   assert.deepEqual(await readRecovery('one'), newer);
   await clearRecovery('one', 11);

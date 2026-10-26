@@ -58,8 +58,9 @@ export function inspectStandaloneGame(html) {
     revision: project.revision,
     sceneId: project.activeSceneId,
     productName,
+    identityHash,
     identifier: `com.hexxisstudios.voxshop.game.${identityHash}`,
-    windowTitle: `${title} — Hexxis Studios`,
+    windowTitle: title,
   };
 }
 

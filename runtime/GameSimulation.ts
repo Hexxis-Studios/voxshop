@@ -8,6 +8,7 @@ import {
   type WorldEdit,
 } from '../services/worldDocument';
 import { SpatialIndex } from './SpatialIndex';
+import { compileGameFormula, type GameFormula } from '../services/gameFormula';
 import {
   findVoxelPath,
   findGridPath,
@@ -90,6 +91,10 @@ const MAX_RUNTIME_SPAWNED_INSTANCES = 1000;
 const MAX_INTERACTION_QUERY_CELLS = 4096;
 const ENEMY_NAV_CELL_SIZE = 0.5;
 const ENEMY_NAV_PADDING_CELLS = 10;
+
+function numericOwnValue(record: Record<string, number>, id: string) {
+  return Object.hasOwn(record, id) ? (record[id] ?? 0) : 0;
+}
 
 function encodePhysicsWorld(world: Uint8Array) {
   let binary = '';
@@ -224,6 +229,7 @@ export class GameSimulation {
   selectedMultiplayerPlayerNodeId: string | null = null;
   private touchingNodeIds = new Set<string>();
   private simulatedSeconds = 0;
+  private readonly numericFormulas = new WeakMap<object, GameFormula>();
   private previous: GameInput = {};
   private animationTimes = new Map<string, { clip: string; time: number }>();
   private constructionPaintId: string | null = null;
@@ -2691,17 +2697,43 @@ export class GameSimulation {
               : node;
         switch (action.type) {
           case 'set':
-            this.writeVariable(action.variable, action.value, action.scope);
-            if (action.scope !== 'campaign' && this.navigationGateVariables.has(action.variable))
-              this.invalidateNavigation();
-            break;
           case 'add': {
+            let value = action.value;
+            if (action.formula !== undefined) {
+              try {
+                let formula = this.numericFormulas.get(action);
+                if (!formula) {
+                  formula = compileGameFormula(action.formula);
+                  this.numericFormulas.set(action, formula);
+                }
+                value = formula({
+                  variable: (scope, id) =>
+                    numericOwnValue(scope === 'campaign' ? this.campaignVariables : this.variables, id),
+                  item: (id) =>
+                    this.inventory.reduce(
+                      (total, stack) => total + (stack.itemId === id ? stack.quantity : 0),
+                      0,
+                    ),
+                  health: (id) => numericOwnValue(this.health, id),
+                  time: this.simulatedSeconds,
+                  frame: this.frame,
+                });
+              } catch (error) {
+                this.message = `Could not calculate ${action.variable}: ${(error as Error).message}`;
+                this.emit('message', node.id, this.message);
+                actionFailed = true;
+                break;
+              }
+            }
             const variables = action.scope === 'campaign' ? this.campaignVariables : this.variables;
-            this.writeVariable(
-              action.variable,
-              (variables[action.variable] ?? 0) + action.value,
-              action.scope,
-            );
+            const next = action.type === 'add' ? numericOwnValue(variables, action.variable) + value : value;
+            if (!Number.isFinite(next)) {
+              this.message = `Could not calculate ${action.variable}: result must be finite.`;
+              this.emit('message', node.id, this.message);
+              actionFailed = true;
+              break;
+            }
+            this.writeVariable(action.variable, next, action.scope);
             if (action.scope !== 'campaign' && this.navigationGateVariables.has(action.variable))
               this.invalidateNavigation();
             break;

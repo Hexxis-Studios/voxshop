@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
+import { compileGameFormula } from '../services/gameFormula';
 import {
   type Action,
   type AudioClipDocument,
@@ -66,7 +67,9 @@ export function RuleEditor({
 
   return (
     <div>
-      <p>Choose what happens when an event occurs. API v1 actions use bounded data, never scripts.</p>
+      <p>
+        Combine events, conditions and actions to define your gameplay. Variable actions can use formulas.
+      </p>
       {rules.map((rule, ruleIndex) => (
         <section className="studio-component" key={ruleIndex}>
           <div>
@@ -474,6 +477,15 @@ function ActionEditor({
   onRemove: () => void;
   canRemove: boolean;
 }) {
+  const formulaHelpId = useId();
+  let formulaError: string | undefined;
+  if ((action.type === 'set' || action.type === 'add') && action.formula !== undefined) {
+    try {
+      compileGameFormula(action.formula);
+    } catch (error) {
+      formulaError = (error as Error).message;
+    }
+  }
   return (
     <div className="studio-component">
       <div>
@@ -552,11 +564,41 @@ function ActionEditor({
               <option value="campaign">Across scenes</option>
             </select>
           </label>
-          <NumberInput
-            label={action.type === 'set' ? 'Value' : 'Amount'}
-            value={action.value}
-            onChange={(value) => onChange({ ...action, value })}
-          />
+          <label className="studio-check">
+            <input
+              type="checkbox"
+              checked={action.formula !== undefined}
+              onChange={(event) =>
+                onChange({ ...action, formula: event.target.checked ? String(action.value) : undefined })
+              }
+            />{' '}
+            Use formula
+          </label>
+          {action.formula !== undefined ? (
+            <label className="studio-field">
+              {action.type === 'set' ? 'Value formula' : 'Amount formula'}
+              <input
+                value={action.formula}
+                aria-label={action.type === 'set' ? 'Value formula' : 'Amount formula'}
+                aria-describedby={formulaHelpId}
+                aria-invalid={Boolean(formulaError)}
+                maxLength={256}
+                spellCheck={false}
+                onChange={(event) => onChange({ ...action, formula: event.target.value })}
+              />
+              {formulaError && <small role="alert">{formulaError}</small>}
+              <small id={formulaHelpId}>
+                Example: clamp(scene("score") + item("gem") * 10, 0, 100). Use campaign("id") for shared
+                progress; time is seconds.
+              </small>
+            </label>
+          ) : (
+            <NumberInput
+              label={action.type === 'set' ? 'Value' : 'Amount'}
+              value={action.value}
+              onChange={(value) => onChange({ ...action, value })}
+            />
+          )}
         </>
       ) : action.type === 'emit' ? (
         <>

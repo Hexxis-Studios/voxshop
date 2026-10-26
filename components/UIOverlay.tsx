@@ -184,7 +184,7 @@ interface UIOverlayProps {
   onPlayTimeLapse: () => void;
   onRestoreSnapshot: () => void;
   onImportImage: (file: File) => void;
-  onImportMesh: (file: File) => void;
+  onImportMesh: (files: File[]) => void;
   onImportVox: (file: File) => void;
   onImportQB: (file: File) => void;
   onImportMinecraft: (file: File) => void;
@@ -274,6 +274,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const glbInputRef = useRef<HTMLInputElement>(null);
+  const glbFolderInputRef = useRef<HTMLInputElement>(null);
   const objInputRef = useRef<HTMLInputElement>(null);
   const stlInputRef = useRef<HTMLInputElement>(null);
   const plyInputRef = useRef<HTMLInputElement>(null);
@@ -330,11 +331,20 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
 
                     <div className="h-px bg-white/5 my-1" />
                     <div className="px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Import — 3D Mesh (Voxelized)</div>
-                    <DropdownItem onClick={() => glbInputRef.current?.click()} icon={<Box size={16}/>} label="Game-Ready GLB (.glb / .gltf)" />
+                    <DropdownItem onClick={() => glbInputRef.current?.click()} icon={<Box size={16}/>} label="GLB / glTF (rig & clips)" />
+                    <DropdownItem onClick={() => {
+                      const input = glbFolderInputRef.current;
+                      if (!input) return;
+                      input.setAttribute('webkitdirectory', '');
+                      input.click();
+                    }} icon={<FolderOpen size={16}/>} label="glTF folder (keep subfolders)" />
+                    <div className="px-3 py-1 text-[10px] leading-relaxed text-slate-500">
+                      For .gltf files, select the model and its referenced files, or import the containing folder.
+                    </div>
                     <DropdownItem onClick={() => objInputRef.current?.click()} icon={<Box size={16}/>} label="Wavefront OBJ (.obj)" />
                     <DropdownItem onClick={() => stlInputRef.current?.click()} icon={<Box size={16}/>} label="3D Print STL (.stl)" />
                     <DropdownItem onClick={() => plyInputRef.current?.click()} icon={<Box size={16}/>} label="Point Cloud PLY (.ply)" />
-                    <DropdownItem onClick={() => fbxInputRef.current?.click()} icon={<Box size={16}/>} label="3D Animation FBX (.fbx)" />
+                    <DropdownItem onClick={() => fbxInputRef.current?.click()} icon={<Box size={16}/>} label="FBX (skinned rig & clips)" />
 
                     {presets.length > 0 && (
                         <>
@@ -552,11 +562,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({
       </div>
 
       <input type="file" ref={imageInputRef} className="hidden" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportImage(file); e.target.value = ''; }} />
-      <input type="file" ref={glbInputRef} className="hidden" accept=".glb,.gltf" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh(file); e.target.value = ''; }} />
-      <input type="file" ref={objInputRef} className="hidden" accept=".obj" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh(file); e.target.value = ''; }} />
-      <input type="file" ref={stlInputRef} className="hidden" accept=".stl" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh(file); e.target.value = ''; }} />
-      <input type="file" ref={plyInputRef} className="hidden" accept=".ply" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh(file); e.target.value = ''; }} />
-      <input type="file" ref={fbxInputRef} className="hidden" accept=".fbx" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh(file); e.target.value = ''; }} />
+      <input type="file" ref={glbInputRef} className="hidden" multiple onChange={(e) => { const files = Array.from(e.target.files ?? []); if (files.length) onImportMesh(files); e.target.value = ''; }} />
+      <input type="file" ref={glbFolderInputRef} className="hidden" multiple onChange={(e) => { const files = Array.from(e.target.files ?? []); if (files.length) onImportMesh(files); e.target.value = ''; }} />
+      <input type="file" ref={objInputRef} className="hidden" accept=".obj" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh([file]); e.target.value = ''; }} />
+      <input type="file" ref={stlInputRef} className="hidden" accept=".stl" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh([file]); e.target.value = ''; }} />
+      <input type="file" ref={plyInputRef} className="hidden" accept=".ply" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh([file]); e.target.value = ''; }} />
+      <input type="file" ref={fbxInputRef} className="hidden" accept=".fbx" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMesh([file]); e.target.value = ''; }} />
       <input type="file" ref={voxInputRef} className="hidden" accept=".vox" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportVox(file); e.target.value = ''; }} />
       <input type="file" ref={qbInputRef} className="hidden" accept=".qb" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportQB(file); e.target.value = ''; }} />
       <input type="file" ref={mcInputRef} className="hidden" accept=".nbt,.schematic,.litematic" onChange={(e) => { const file = e.target.files?.[0]; if (file) onImportMinecraft(file); e.target.value = ''; }} />

@@ -138,6 +138,12 @@
 .studio-spacer {
   flex: 1;
 }
+.studio-export-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .studio-toolbar {
   display: flex;
   align-items: center;
@@ -621,6 +627,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
+.studio-two.studio-recovery-actions {
+  grid-template-columns: 1fr;
+}
 .studio-component {
   background: #101922;
   border: 1px solid var(--line);
@@ -974,6 +983,23 @@
   font-family: ui-monospace, monospace;
   user-select: all;
 }
+.studio-multiplayer-play-created {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.studio-checkbox-field {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+  color: var(--muted);
+  font-size: 11px;
+}
+.studio-checkbox-field input {
+  flex: 0 0 auto;
+  width: auto !important;
+  margin: 0;
+}
 .studio-multiplayer-created dl {
   margin: 12px 0 0;
   font-size: 11px;
@@ -1076,6 +1102,9 @@
 }
 .studio-multiplayer-join-secret input {
   flex: 1;
+}
+.studio-multiplayer-join form .studio-checkbox-field input {
+  padding: 0;
 }
 .studio-multiplayer-join-actions {
   margin-top: 4px;
@@ -1417,6 +1446,15 @@
   }
   .studio-export-game {
     grid-column: 5;
+  }
+  .studio-export-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .studio-export-controls select,
+  .studio-export-controls .studio-export-game {
+    grid-column: auto;
   }
   .studio-header > .studio-spacer {
     display: none;

@@ -294,18 +294,39 @@ export function createAssetVisual(asset: Asset, hiddenBones: string[] = []): Ass
   const restPositions = new Map<string, [number, number, number]>();
   const restRotations = new Map<string, THREE.Quaternion>();
   if (rig) {
+    const joints = new Map(rig.joints.map((joint) => [joint.name, joint]));
+    const worldRotations = new Map<string, THREE.Quaternion>();
+    const initializeJoint = (name: string): THREE.Quaternion => {
+      const cached = worldRotations.get(name);
+      if (cached) return cached;
+      const joint = joints.get(name)!;
+      const parent = joint.parent ? joints.get(joint.parent)! : null;
+      const parentWorldRotation = parent ? initializeJoint(parent.name) : new THREE.Quaternion();
+      const rest = parent
+        ? new THREE.Vector3(
+            joint.position[0] - parent.position[0],
+            joint.position[1] - parent.position[1],
+            joint.position[2] - parent.position[2],
+          ).applyQuaternion(parentWorldRotation.clone().invert())
+        : new THREE.Vector3(...joint.position);
+      const b = bones.get(name)!;
+      b.position.copy(rest);
+      b.rotation.set(...joint.rotation);
+      restPositions.set(name, [rest.x, rest.y, rest.z]);
+      restRotations.set(name, b.quaternion.clone());
+      const worldRotation = parentWorldRotation
+        .clone()
+        .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(...joint.rotation)));
+      worldRotations.set(name, worldRotation);
+      return worldRotation;
+    };
     for (const j of rig.joints) {
       const b = new THREE.Bone();
       b.name = j.name;
-      const p = j.parent ? rig.joints.find((p) => p.name === j.parent)!.position : [0, 0, 0];
-      const rest = j.position.map((n, i) => n - p[i]) as [number, number, number];
-      restPositions.set(j.name, rest);
-      b.position.set(...rest);
-      b.rotation.set(...j.rotation);
-      restRotations.set(j.name, b.quaternion.clone());
       bones.set(j.name, b);
       allBones.push(b);
     }
+    for (const j of rig.joints) initializeJoint(j.name);
     for (const j of rig.joints) if (j.parent) bones.get(j.parent)!.add(bones.get(j.name)!);
   }
   const geom = createVoxelGeometry(asset, hiddenBones);

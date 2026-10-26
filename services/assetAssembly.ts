@@ -2,6 +2,7 @@ import { generateRecipe, type Recipe } from './recipeGenerator';
 import { createModelDocument, type ModelDocument } from './modelDocument';
 import { addAnimationPreset } from './animationPresets';
 import type { Asset, Rig } from './projectDocument';
+import * as THREE from 'three';
 
 export type CharacterOptions = {
   id: string;
@@ -18,7 +19,15 @@ export function sculptedAsset(asset: Asset, model: ModelDocument): Asset {
   const next = { ...structuredClone(asset), model: createModelDocument(model.voxels, model.skeleton) };
   const skeleton = model.skeleton;
   if (!skeleton) return next;
-  const joints: Rig['joints'] = skeleton.bones.map((bone) => {
+  const jointsByName = new Map<string, Rig['joints'][number]>();
+  const worldRotations = new Map<string, THREE.Quaternion>();
+  const bonesByName = new Map(skeleton.bones.map((bone) => [bone.name, bone]));
+  const toQuaternion = (euler: [number, number, number]) =>
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...euler));
+  const absoluteJoint = (boneName: string): Rig['joints'][number] => {
+    const prior = jointsByName.get(boneName);
+    if (prior) return prior;
+    const bone = bonesByName.get(boneName)!;
     const points = model.voxels.filter((v) => v.bone === bone.name);
     const min = [Infinity, Infinity, Infinity],
       max = [-Infinity, -Infinity, -Infinity];
@@ -27,24 +36,40 @@ export function sculptedAsset(asset: Asset, model: ModelDocument): Asset {
         min[i] = Math.min(min[i], v[key as 'x' | 'y' | 'z']);
         max[i] = Math.max(max[i], v[key as 'x' | 'y' | 'z']);
       }
-    const position = points.length ? min.map((n, i) => (n + max[i]) / 2) : [0, 0, 0];
-    const pivots: Partial<Record<typeof bone.pivotType, [number, number]>> = {
-      left: [0, 0],
-      right: [0, 1],
-      bottom: [1, 0],
-      top: [1, 1],
-      back: [2, 0],
-      front: [2, 1],
-    };
-    const pivot = pivots[bone.pivotType];
-    if (pivot && points.length) position[pivot[0]] = pivot[1] ? max[pivot[0]] : min[pivot[0]];
-    return {
-      name: bone.name,
-      parent: bone.parent,
-      position: position as [number, number, number],
-      rotation: [0, 0, 0],
-    };
-  });
+    let position: [number, number, number];
+    let rotation: [number, number, number];
+    if (bone.bindPosition) {
+      const parent = bone.parent ? absoluteJoint(bone.parent) : null;
+      const parentRotation = parent ? worldRotations.get(parent.name)! : new THREE.Quaternion();
+      const local = new THREE.Vector3(...bone.bindPosition).applyQuaternion(parentRotation);
+      position = parent
+        ? [parent.position[0] + local.x, parent.position[1] + local.y, parent.position[2] + local.z]
+        : [...bone.bindPosition];
+      rotation = bone.bindRotation ?? [0, 0, 0];
+      worldRotations.set(bone.name, parentRotation.clone().multiply(toQuaternion(rotation)));
+    } else {
+      const pivots: Partial<Record<typeof bone.pivotType, [number, number]>> = {
+        left: [0, 0],
+        right: [0, 1],
+        bottom: [1, 0],
+        top: [1, 1],
+        back: [2, 0],
+        front: [2, 1],
+      };
+      const pivot = pivots[bone.pivotType];
+      const center = points.length ? min.map((n, i) => (n + max[i]) / 2) : [0, 0, 0];
+      if (pivot && points.length) center[pivot[0]] = pivot[1] ? max[pivot[0]] : min[pivot[0]];
+      position = center as [number, number, number];
+      rotation = bone.bindRotation ?? [0, 0, 0];
+      const parent = bone.parent ? absoluteJoint(bone.parent) : null;
+      const parentRotation = parent ? worldRotations.get(parent.name)! : new THREE.Quaternion();
+      worldRotations.set(bone.name, parentRotation.clone().multiply(toQuaternion(rotation)));
+    }
+    const joint = { name: bone.name, parent: bone.parent, position, rotation };
+    jointsByName.set(bone.name, joint);
+    return joint;
+  };
+  const joints = skeleton.bones.map((bone) => absoluteJoint(bone.name));
   const names = new Set(joints.map((j) => j.name));
   const prior = next.rig;
   next.rig = {
@@ -69,6 +94,7 @@ export function sculptedAsset(asset: Asset, model: ModelDocument): Asset {
               time: Math.min(k.time, animation.duration),
               rotation: k.rot ?? [0, 0, 0],
               ...(k.pos && { position: k.pos }),
+              ...(k.interpolation && { interpolation: k.interpolation }),
             })),
           })),
         events: [],

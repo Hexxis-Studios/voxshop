@@ -5,12 +5,16 @@ export interface BoneDef {
     parent: string | null;
     pivotType: PivotType;
     color: string;
+    /** Optional local rest transform for imported rigs, measured in model voxels. */
+    bindPosition?: [number, number, number];
+    bindRotation?: [number, number, number];
 }
 
 export interface AnimKeyframe {
     time: number;
     rot?: [number, number, number];
     pos?: [number, number, number];
+    interpolation?: 'linear' | 'smooth' | 'step';
 }
 
 export interface AnimationDef {

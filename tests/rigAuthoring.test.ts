@@ -43,6 +43,7 @@ import {
   transactionSchema,
   validateProject,
   type Asset,
+  type Rig,
 } from '../services/projectDocument';
 import { createAssetVisual } from '../runtime/assetMesh';
 
@@ -538,6 +539,99 @@ test('native clip and keyframe edits stay ordered, bounded and schema-valid', ()
       .length,
     1,
   );
+});
+
+test('inserts a sampled keyframe into an imported end-to-end track without changing its source keys', () => {
+  const source = riggedAsset();
+  const importedRig = structuredClone(source.rig!);
+  const importedClip = importedRig.clips[0];
+  importedClip.duration = 2;
+  importedClip.blendIn = 0;
+  importedClip.tracks[0].keys = [
+    { time: 0, rotation: [0, 0, 0], position: [0, 0, 0], interpolation: 'linear' },
+    { time: 2, rotation: [0, Math.PI / 2, 0], position: [2, 0, 0] },
+  ];
+  const imported = assetSchema.parse({ ...source, rig: importedRig });
+  const originalRig = structuredClone(imported.rig!);
+  const nextRig = addRigKeyframe(imported.rig!, importedClip.name, 'arm');
+  const inserted = nextRig.clips[0].tracks[0].keys;
+
+  assert.deepEqual(imported.rig, originalRig, 'inserting a key does not mutate the imported source');
+  assert.deepEqual(
+    inserted.map((key) => key.time),
+    [0, 1, 2],
+  );
+  assert.deepEqual(inserted[0], originalRig.clips[0].tracks[0].keys[0]);
+  assert.deepEqual(inserted[2], originalRig.clips[0].tracks[0].keys[1]);
+  assert.deepEqual(inserted[1].position, [1, 0, 0]);
+  assert.equal(inserted[1].interpolation, 'linear');
+  const expectedRotation = new Euler().setFromQuaternion(
+    new Quaternion()
+      .setFromEuler(new Euler(...inserted[0].rotation))
+      .slerp(new Quaternion().setFromEuler(new Euler(...inserted[2].rotation)), 0.5),
+  );
+  assert.ok(Math.abs(inserted[1].rotation[0] - expectedRotation.x) < 1e-8);
+  assert.ok(Math.abs(inserted[1].rotation[1] - expectedRotation.y) < 1e-8);
+  assert.ok(Math.abs(inserted[1].rotation[2] - expectedRotation.z) < 1e-8);
+
+  for (const interpolation of ['smooth', 'step'] as const) {
+    const modeRig = structuredClone(originalRig);
+    modeRig.clips[0].tracks[0].keys[0].interpolation = interpolation;
+    const modeKeys = addRigKeyframe(modeRig, importedClip.name, 'arm').clips[0].tracks[0].keys;
+    assert.equal(modeKeys[1].interpolation, interpolation);
+    if (interpolation === 'step') {
+      assert.deepEqual(modeKeys[1].rotation, modeKeys[0].rotation);
+      assert.deepEqual(modeKeys[1].position, modeKeys[0].position);
+    }
+  }
+
+  const originalVisual = createAssetVisual(imported);
+  const insertedVisual = createAssetVisual({ ...imported, rig: nextRig });
+  for (const time of [0.25, 0.75, 1.25, 1.75]) {
+    originalVisual.animate(importedClip.name, time);
+    insertedVisual.animate(importedClip.name, time);
+    const originalBone = originalVisual.bones.get('arm')!;
+    const insertedBone = insertedVisual.bones.get('arm')!;
+    assert.ok(originalBone.quaternion.angleTo(insertedBone.quaternion) < 1e-8);
+    assert.ok(Math.abs(originalBone.position.x - insertedBone.position.x) < 1e-8);
+    assert.ok(Math.abs(originalBone.position.y - insertedBone.position.y) < 1e-8);
+    assert.ok(Math.abs(originalBone.position.z - insertedBone.position.z) < 1e-8);
+  }
+
+  const project = validateProject({ ...newProject('rig-keyframe', 'Rig keyframe'), assets: [imported] });
+  const html = renderToStaticMarkup(
+    React.createElement(RigEditor, {
+      asset: imported,
+      project,
+      json: JSON.stringify(imported.rig),
+      onJsonChange: () => {},
+      onChange: () => {},
+    }),
+  );
+  assert.match(html, /<button type="button">\+ Add keyframe<\/button>/);
+});
+
+test('adds one-key tracks safely and rejects schema-invalid empty tracks without mutation', () => {
+  const oneKeyRig = structuredClone(riggedAsset().rig!);
+  oneKeyRig.clips[0].tracks[0].keys = [{ time: 1, rotation: [0, Math.PI / 4, 0], interpolation: 'smooth' }];
+  const originalOneKeyRig = structuredClone(oneKeyRig);
+  const added = addRigKeyframe(oneKeyRig, oneKeyRig.clips[0].name, 'arm');
+  assert.deepEqual(oneKeyRig, originalOneKeyRig);
+  assert.deepEqual(
+    added.clips[0].tracks[0].keys.map((key) => key.time),
+    [0.5, 1],
+  );
+  assert.deepEqual(added.clips[0].tracks[0].keys[0].rotation, [0, Math.PI / 4, 0]);
+  assert.equal(added.clips[0].tracks[0].keys[0].interpolation, 'smooth');
+
+  const emptyTrackRig = structuredClone(oneKeyRig) as Rig;
+  emptyTrackRig.clips[0].tracks[0].keys = [];
+  const originalEmptyTrackRig = structuredClone(emptyTrackRig);
+  assert.throws(
+    () => addRigKeyframe(emptyTrackRig, emptyTrackRig.clips[0].name, 'arm'),
+    /at least one keyframe/,
+  );
+  assert.deepEqual(emptyTrackRig, originalEmptyTrackRig);
 });
 
 test('native marker edits stay ordered, within clip duration and inside the schema limit', () => {

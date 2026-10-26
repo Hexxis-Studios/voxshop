@@ -10,12 +10,17 @@ import {
 
 test('client protocol accepts bounded join, input intentions and leave messages', () => {
   const credential = 'A'.repeat(43);
+  const resumeCredential = 'R'.repeat(43);
   assert.deepEqual(parseClientMessage({ version: 1, type: 'join', gameId: 'arena-1', credential }), {
     version: 1,
     type: 'join',
     gameId: 'arena-1',
     credential,
   });
+  assert.deepEqual(
+    parseClientMessage({ version: 1, type: 'join', gameId: 'arena-1', resumeCredential, reconnect: true }),
+    { version: 1, type: 'join', gameId: 'arena-1', resumeCredential, reconnect: true },
+  );
   assert.deepEqual(
     parseClientMessage({
       version: 1,
@@ -69,6 +74,7 @@ test('client protocol rejects unsupported versions, malformed sequence and out-o
     { version: 1, type: 'join', gameId: '../arena', credential: 'A'.repeat(43) },
     { version: 1, type: 'join', gameId: 'arena-1' },
     { version: 1, type: 'join', gameId: 'arena-1', credential: 'short' },
+    { version: 1, type: 'join', gameId: 'arena-1', resumeCredential: 'short' },
     { version: 1, type: 'input', sequence: -1, input: {} },
     { version: 1, type: 'input', sequence: 1.5, input: {} },
     { version: 1, type: 'input', sequence: 1, input: { moveX: 1.01 } },

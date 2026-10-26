@@ -19,7 +19,7 @@ export default function MultiplayerRooms({
 }: {
   onClose: () => void;
   projectBinding?: MultiplayerProjectBinding;
-  onPlayCreated?: (room: CreatedRoom) => void;
+  onPlayCreated?: (room: CreatedRoom & { resumeAfterReload: boolean }) => void;
   children?: React.ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -27,6 +27,7 @@ export default function MultiplayerRooms({
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [created, setCreated] = useState<CreatedRoom | null>(null);
   const [maxPlayers, setMaxPlayers] = useState(16);
+  const [resumeAfterReload, setResumeAfterReload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -229,9 +230,23 @@ export default function MultiplayerRooms({
       </section>
 
       {created?.projectBinding && onPlayCreated && (
-        <button type="button" className="studio-primary" onClick={() => onPlayCreated(created)}>
-          Play this room
-        </button>
+        <section className="studio-multiplayer-play-created">
+          <label className="studio-checkbox-field">
+            <input
+              type="checkbox"
+              checked={resumeAfterReload}
+              onChange={(event) => setResumeAfterReload(event.target.checked)}
+            />
+            Resume my player after a reload in this tab
+          </label>
+          <button
+            type="button"
+            className="studio-primary"
+            onClick={() => onPlayCreated({ ...created, resumeAfterReload })}
+          >
+            Play this room
+          </button>
+        </section>
       )}
       {children}
       {error && (

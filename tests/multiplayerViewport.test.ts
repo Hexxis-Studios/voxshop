@@ -142,16 +142,21 @@ test('Stop clears the active multiplayer connection before returning to editor m
 test('Dispose clears the active multiplayer connection and releases viewport resources', () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const originalCancelAnimationFrame = Object.getOwnPropertyDescriptor(globalThis, 'cancelAnimationFrame');
-  let closeCount = 0;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: { removeEventListener() {} },
   });
   Object.defineProperty(globalThis, 'cancelAnimationFrame', { configurable: true, value() {} });
   try {
+    let closeCount = 0,
+      pageExitDisconnectCount = 0;
     const viewport = Object.assign(Object.create(GameViewport.prototype), {
       session: null,
-      multiplayer: { close: async () => closeCount++, info: () => ({ state: 'connected' }) },
+      multiplayer: {
+        close: async () => closeCount++,
+        disconnectForPageExit: async () => pageExitDisconnectCount++,
+        info: () => ({ state: 'connected' }),
+      },
       importedAudio: { dispose() {} },
       audio: { dispose() {} },
       frame: 0,
@@ -169,7 +174,8 @@ test('Dispose clears the active multiplayer connection and releases viewport res
 
     viewport.dispose();
 
-    assert.equal(closeCount, 1);
+    assert.equal(closeCount, 0, 'Page disposal must not send explicit Leave.');
+    assert.equal(pageExitDisconnectCount, 1, 'Page disposal must use the disconnect lifecycle.');
     assert.equal(viewport.multiplayerInfo().state, 'disconnected');
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);

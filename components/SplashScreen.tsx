@@ -24,6 +24,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onEnter }) => {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        boxSizing: 'border-box',
+        padding: '24px 16px 16px',
         backgroundColor: '#0d1117',
         transition: 'opacity 0.5s',
         opacity: fading ? 0 : 1,
@@ -31,15 +33,27 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onEnter }) => {
       }}
     >
       <div
-        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, marginTop: -360 }}
+        style={{
+          display: 'flex',
+          flex: '1 1 auto',
+          width: '100%',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 28,
+        }}
       >
-        <img src={logo} alt="VoxShop" style={{ width: 720, height: 720, objectFit: 'contain' }} />
+        <img
+          src={logo}
+          alt="VoxShop"
+          style={{ width: 'min(80vw, 720px)', height: 'auto', maxHeight: '30vh', objectFit: 'contain' }}
+        />
 
         <button
           onClick={handleEnter}
           style={{
-            marginTop: -200,
-            padding: '18px 72px',
+            marginTop: 0,
+            padding: '18px clamp(24px, 8vw, 72px)',
             background: '#2563eb',
             color: '#fff',
             border: 'none',
@@ -57,16 +71,15 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onEnter }) => {
 
       <div
         style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
+          boxSizing: 'border-box',
+          width: '100%',
           borderTop: '1px solid rgba(255,255,255,0.05)',
-          padding: '16px 32px',
+          padding: '16px 16px 0',
           display: 'flex',
+          flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 16,
+          gap: 12,
         }}
       >
         <a

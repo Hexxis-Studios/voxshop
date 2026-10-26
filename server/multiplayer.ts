@@ -69,7 +69,8 @@ function credentialHash(credential: string) {
   return createHash('sha256').update(credential).digest();
 }
 
-function hasCredential(credential: string, expectedHash: Buffer) {
+function hasCredential(credential: string | undefined, expectedHash: Buffer) {
+  if (!credential) return false;
   const actualHash = credentialHash(credential);
   return actualHash.length === expectedHash.length && timingSafeEqual(actualHash, expectedHash);
 }
@@ -632,9 +633,9 @@ export class MultiplayerGateway {
         const managed = this.rooms.get(message.gameId);
         if (!managed) return this.reject(connection, 'unknown-room');
         this.pruneExpiredPlayers(managed);
-        if (!hasCredential(message.credential, managed.credentialHash))
-          return this.reject(connection, 'invalid-credential');
         const resumed = message.resumeCredential !== undefined;
+        if (!resumed && !hasCredential(message.credential, managed.credentialHash))
+          return this.reject(connection, 'invalid-credential');
         const reconnectable = resumed || message.reconnect === true;
         const playerId = resumed ? this.findResumePlayer(managed, message.resumeCredential!) : undefined;
         if (resumed && !playerId) return this.reject(connection, 'invalid-credential');

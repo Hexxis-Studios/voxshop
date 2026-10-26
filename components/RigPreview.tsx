@@ -32,6 +32,7 @@ export function RigPreview({ asset }: { asset: Asset }) {
   const [speed, setSpeed] = useState(1);
   const [time, setTime] = useState(0);
   const [error, setError] = useState('');
+  const clip = asset.rig?.clips.find((entry) => entry.name === clipName);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -93,7 +94,7 @@ export function RigPreview({ asset }: { asset: Asset }) {
       if (playingRef.current) current += (Math.max(0, now - startedAtRef.current) * speedRef.current) / 1000;
       let shownTime = current;
       if (duration > 0) {
-        if (loopRef.current) shownTime = current % duration;
+        if (loopRef.current && playingRef.current) shownTime = current % duration;
         else if (current >= duration) {
           current = duration;
           shownTime = duration;
@@ -102,7 +103,12 @@ export function RigPreview({ asset }: { asset: Asset }) {
           setPlaying(false);
         }
       }
-      visualRef.current?.animate(clipRef.current, current);
+      // A paused scrub to the last key must show that pose, rather than wrapping a looping clip to zero.
+      const sampleTime =
+        !playingRef.current && loopRef.current && current === duration && duration > 0
+          ? Math.max(0, duration - 1e-6)
+          : current;
+      visualRef.current?.animate(clipRef.current, sampleTime);
       controls.update();
       renderer.render(scene, camera);
       if (now - lastUiUpdate >= 200) {
@@ -194,14 +200,16 @@ export function RigPreview({ asset }: { asset: Asset }) {
   }, [asset]);
 
   useEffect(() => {
-    const clip = asset.rig?.clips.find((entry) => entry.name === clipName);
-    clipRef.current = clipName;
     durationRef.current = clip?.duration ?? 0;
     loopRef.current = clip?.loop ?? false;
+  }, [clip?.duration, clip?.loop]);
+
+  useEffect(() => {
+    clipRef.current = clipName;
     offsetRef.current = 0;
     startedAtRef.current = performance.now();
     setTime(0);
-  }, [asset, clipName]);
+  }, [asset.id, clipName]);
 
   useEffect(() => {
     playingRef.current = playing;
@@ -216,7 +224,6 @@ export function RigPreview({ asset }: { asset: Asset }) {
     if (clipName && !clip && !asset.rig?.clips.length) setClipName('');
   }, [asset, clipName]);
 
-  const clip = asset.rig?.clips.find((entry) => entry.name === clipName);
   const seek = (value: number) => {
     offsetRef.current = value;
     startedAtRef.current = performance.now();
@@ -304,6 +311,7 @@ export function RigPreview({ asset }: { asset: Asset }) {
               const now = performance.now();
               let current = offsetRef.current + ((now - startedAtRef.current) * speedRef.current) / 1000;
               if (!loopRef.current) current = Math.min(current, durationRef.current);
+              else if (durationRef.current > 0) current %= durationRef.current;
               seek(current);
             }
             setPlaying((value) => !value);

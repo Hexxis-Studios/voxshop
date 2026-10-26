@@ -1,3 +1,4 @@
+import { Euler, Quaternion } from 'three';
 import {
   idSchema,
   identityTransform,
@@ -295,9 +296,57 @@ export function addRigKeyframe(rig: Rig, clipName: string, jointName: string): R
     const track = clip.tracks.find((entry) => entry.joint === jointName);
     if (!track) throw new Error('Animation track not found.');
     if (track.keys.length >= 2048) throw new Error('A track can contain at most 2,048 keyframes.');
-    const lastTime = Math.max(...track.keys.map((key) => key.time));
-    if (lastTime >= clip.duration) throw new Error('There is no time remaining in this clip.');
-    track.keys.push({ time: lastTime + (clip.duration - lastTime) / 2, rotation: [0, 0, 0] });
+    const keys = track.keys.slice().sort((a, b) => a.time - b.time);
+    if (!keys.length) throw new Error('An animation track must contain at least one keyframe.');
+
+    const gaps: { start: number; end: number; left?: RigKey; right?: RigKey }[] = [
+      { start: 0, end: keys[0].time, left: undefined, right: keys[0] },
+      ...keys.slice(1).map((key, index) => ({
+        start: keys[index].time,
+        end: key.time,
+        left: keys[index],
+        right: key,
+      })),
+      { start: keys.at(-1)!.time, end: clip.duration, left: keys.at(-1)!, right: undefined },
+    ].filter((gap) => gap.end > gap.start);
+    let gap: (typeof gaps)[number] | undefined;
+    for (const candidate of gaps)
+      if (!gap || candidate.end - candidate.start > gap.end - gap.start) gap = candidate;
+    const time = gap ? gap.start + (gap.end - gap.start) / 2 : Number.NaN;
+    if (!gap || !(time > gap.start && time < gap.end))
+      throw new Error('There is no time remaining in this clip.');
+
+    const from = gap.left ?? gap.right!;
+    const to = gap.right ?? from;
+    const hasPair = Boolean(gap.left && gap.right);
+    let alpha = hasPair ? (time - from.time) / (to.time - from.time) : 0;
+    if (from.interpolation === 'step') alpha = 0;
+    else if (from.interpolation === 'smooth') alpha = alpha * alpha * (3 - 2 * alpha);
+    let rotation: [number, number, number] = [...from.rotation];
+    if (hasPair && alpha !== 0) {
+      const euler = new Euler().setFromQuaternion(
+        new Quaternion()
+          .setFromEuler(new Euler(...from.rotation))
+          .slerp(new Quaternion().setFromEuler(new Euler(...to.rotation)), alpha),
+      );
+      rotation = [euler.x, euler.y, euler.z];
+    }
+    const position =
+      from.position || to.position
+        ? hasPair
+          ? ([0, 1, 2].map(
+              (axis) =>
+                (from.position?.[axis] ?? 0) +
+                ((to.position?.[axis] ?? 0) - (from.position?.[axis] ?? 0)) * alpha,
+            ) as [number, number, number])
+          : ([...(from.position ?? to.position!)] as [number, number, number])
+        : undefined;
+    track.keys.push({
+      time,
+      rotation,
+      ...(position && { position }),
+      ...(from.interpolation && { interpolation: from.interpolation }),
+    });
     track.keys.sort((a, b) => a.time - b.time);
   });
 }

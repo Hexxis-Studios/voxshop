@@ -22,7 +22,10 @@ export class MultiplayerGameConnection {
     private readonly binding: MultiplayerProjectBinding,
     private readonly apply: (game: MultiplayerGameState, playerId: string) => void,
   ) {
-    this.client = new MultiplayerClient(validateMultiplayerRoomOptions(options));
+    this.client = new MultiplayerClient({
+      ...validateMultiplayerRoomOptions(options),
+      projectBinding: binding,
+    });
   }
   info() {
     return {
@@ -30,6 +33,7 @@ export class MultiplayerGameConnection {
       gameId: this.options.gameId,
       playerId: this.client.playerId,
       ...(this.error ? { error: this.error } : {}),
+      ...(this.client.resumeWarning ? { resumeWarning: this.client.resumeWarning } : {}),
     };
   }
   async connect() {
@@ -90,7 +94,7 @@ export class MultiplayerGameConnection {
     } catch (error) {
       if (!this.error && error instanceof Error) this.error = error.message;
       this.cancelJoin = undefined;
-      await this.close();
+      if (!this.closed) await this.close();
       throw error;
     } finally {
       clearTimeout(timer!);
@@ -102,6 +106,14 @@ export class MultiplayerGameConnection {
     return true;
   }
   async close() {
+    this.detach();
+    await this.client.leave();
+  }
+  async disconnectForPageExit() {
+    this.detach();
+    await this.client.disconnectForPageExit();
+  }
+  private detach() {
     this.closed = true;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
@@ -109,6 +121,5 @@ export class MultiplayerGameConnection {
     this.unsubscribeProtocolError = undefined;
     this.cancelJoin?.(Error('Multiplayer join was cancelled.'));
     this.cancelJoin = undefined;
-    await this.client.leave();
   }
 }

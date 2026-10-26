@@ -135,6 +135,9 @@ const title = document.getElementById('title')!,
   multiplayerEndpoint = document.getElementById('multiplayer-endpoint')! as HTMLInputElement,
   multiplayerRoomId = document.getElementById('multiplayer-room-id')! as HTMLInputElement,
   multiplayerCredential = document.getElementById('multiplayer-credential')! as HTMLInputElement,
+  multiplayerResumeAfterReload = document.getElementById(
+    'multiplayer-resume-after-reload',
+  )! as HTMLInputElement,
   multiplayerCredentialToggle = document.getElementById(
     'multiplayer-credential-toggle',
   )! as HTMLButtonElement,
@@ -678,6 +681,7 @@ multiplayerForm.addEventListener('submit', (event: SubmitEvent) => {
       websocketUrl: multiplayerEndpoint.value,
       gameId: multiplayerRoomId.value,
       credential: multiplayerCredential.value,
+      resumeAfterReload: multiplayerResumeAfterReload.checked,
     });
   } catch (cause) {
     multiplayerError.textContent = multiplayerErrorMessage(cause, 'Check the room details and try again.');
@@ -839,6 +843,17 @@ document.getElementById('restart')!.addEventListener('click', restart);
 loadProgress();
 if (!viewport.simulation) viewport.play(inspectMode);
 creatorWalkthrough(viewport);
+void viewport
+  .resumeMultiplayerRoom()
+  .then((resumed) => {
+    if (resumed) multiplayerResumeAfterReload.checked = true;
+  })
+  .catch((cause) => {
+    multiplayerError.textContent = multiplayerErrorMessage(
+      cause,
+      'Could not resume the saved multiplayer player.',
+    );
+  });
 // Documented, bounded runtime inspection API for creators' external test harnesses.
 Object.assign(window, {
   VoxShopGame: {

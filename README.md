@@ -9,7 +9,7 @@ Current release: **2.0.0-alpha.1**. The original voxel workshop is included alon
 - [Windows installer and release notes](https://github.com/Hexxis-Studios/voxshop/releases/tag/v2.0.0-alpha.1)
 - [VoxShop on itch.io](https://hexxis-studios.itch.io/voxshop)
 
-On Windows, run the installer and launch **VoxShop**. Node is bundled; no developer tools or AI account are required for editing or playing games. The installer may download Microsoft's WebView2 runtime if it is missing. The alpha installer is not code-signed, so Windows may show an unknown-publisher warning. Linux packages are not included in this release.
+On Windows, run the installer and launch **VoxShop**. Node is bundled; no developer tools or AI account are required for editing or playing games. The installer may download Microsoft's WebView2 runtime if it is missing. The alpha installer is not code-signed, so Windows may show an unknown-publisher warning. Linux DEB and AppImage CI builds are available, but those packages are not included in this release's downloads.
 
 ## Make your first game
 
@@ -18,7 +18,7 @@ On Windows, run the installer and launch **VoxShop**. Node is bundled; no develo
 3. Place assets in a scene. Use the inspector for transforms, hierarchy, equipment, collisions and gameplay components.
 4. Add items and crafting recipes, interactions, objectives, rules, HUDs and scene transitions. Rig Editor provides editable animation keys, blending, markers and sockets.
 5. Press **Play**. Default controls include WASD/arrows, Space to jump, E to interact, and F/click to attack. Player controls can be remapped.
-6. **Save project** makes a portable editable backup. **Export game** downloads a self-contained HTML game that can run without VoxShop or an AI service. [Windows game packaging](docs/windows-game-export.md) is available from source.
+6. **Save project** makes a portable editable backup. Choose **Browser HTML** or, in the Windows desktop editor, **Windows EXE**, then **Export game**. Your game runs without VoxShop or an AI service. See [Windows game export](docs/windows-game-export.md) for requirements and save portability.
 
 ## Use your own agent
 
@@ -32,12 +32,12 @@ The agent discovers the authoring tools and shared guidance from VoxShop. Your e
 
 ## What is included
 
-- Voxel sculpting, materials, image/text/mesh conversion and model import/export.
+- Voxel sculpting, materials, image/text/mesh conversion and model import/export. Self-contained GLB/glTF and FBX imports can preserve skinning and compatible animation clips when they use one supported shared skeleton.
 - Biped, quadruped and machine starters, custom rigs, weighted skinning, articulated animation presets, retargeting and fitted equipment.
 - Scene hierarchy, linked prefabs, procedural worlds, independent model/terrain voxel sizes and sparse terrain editing.
-- Player movement, physics bodies and joints, enemies, interactions, combat, inventory, crafting, construction and editable HUDs.
+- Player movement, physics bodies and joints, enemies, interactions, combat, inventory, crafting, construction and editable HUDs. Event rules include bounded formulas for state-driven `set`/`add` actions.
 - Objectives, campaign variables, scene transitions, local saves and repeatable playtests.
-- Authoritative multiplayer hosting and room joining in editor Play and exported games.
+- Authoritative multiplayer hosting and room joining in editor Play and exported games, with optional tab-scoped resume after reload.
 - Chunk streaming, greedy meshing, spatial instancing, culling and distant terrain detail.
 
 These are composable systems rather than fixed game genres. See the [engine/API guide](docs/engine-api.md), [multiplayer hosting](docs/multiplayer-hosting.md) and [platform and runtime guide](skills/ENGINE_LIMITS.md).

@@ -16,6 +16,7 @@ export default function MultiplayerJoin({ viewport }: { viewport: MultiplayerJoi
   const [websocketUrl, setWebsocketUrl] = useState('');
   const [gameId, setGameId] = useState('');
   const [credential, setCredential] = useState('');
+  const [resumeAfterReload, setResumeAfterReload] = useState(false);
   const [showCredential, setShowCredential] = useState(false);
   const [joining, setJoining] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -34,7 +35,7 @@ export default function MultiplayerJoin({ viewport }: { viewport: MultiplayerJoi
     setError('');
     let options;
     try {
-      options = validateMultiplayerRoomOptions({ websocketUrl, gameId, credential });
+      options = validateMultiplayerRoomOptions({ websocketUrl, gameId, credential, resumeAfterReload });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Check the room details and try again.');
       return;
@@ -111,6 +112,14 @@ export default function MultiplayerJoin({ viewport }: { viewport: MultiplayerJoi
               {showCredential ? 'Hide' : 'Show'}
             </button>
           </span>
+        </label>
+        <label className="studio-checkbox-field">
+          <input
+            type="checkbox"
+            checked={resumeAfterReload}
+            onChange={(event) => setResumeAfterReload(event.target.checked)}
+          />
+          Resume this player after a reload in this tab
         </label>
         <div className="studio-multiplayer-join-actions">
           <button type="submit" className="studio-primary" disabled={joining || leaving || active}>

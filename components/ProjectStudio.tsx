@@ -68,6 +68,19 @@ function download(data: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function importedMeshAssetFields(
+  model: ModelDocument,
+  voxelSize: number,
+): Pick<Asset, 'voxelSize' | 'pivot' | 'source'> {
+  return {
+    voxelSize,
+    pivot: model.voxels.length
+      ? [0, model.voxels.reduce((min, voxel) => Math.min(min, voxel.y), Infinity), 0]
+      : [0, 0, 0],
+    source: { kind: 'imported', description: 'Voxelized 3D mesh import' },
+  };
+}
+
 export default function ProjectStudio() {
   const [project, setProject] = useState<ProjectDocument | null>(null),
     [projects, setProjects] = useState<any[]>([]),
@@ -100,6 +113,8 @@ export default function ProjectStudio() {
     [testsOpen, setTestsOpen] = useState(false),
     [activeJob, setActiveJob] = useState<string | null>(null);
   const [hosted, setHosted] = useState(false);
+  const [nativeGameExport, setNativeGameExport] = useState(false);
+  const [gameTarget, setGameTarget] = useState<'html' | 'windows-exe'>('html');
   const [draft, setDraft] = useState<ModelDocument | null>(null),
     [pendingRecovery, setPendingRecovery] = useState<DraftRecovery | null>(null);
   const viewportHost = useRef<HTMLDivElement>(null),
@@ -210,7 +225,11 @@ export default function ProjectStudio() {
     update(p);
     setNotice('Project opened. Changes save automatically.');
     const recovery = await readRecovery(id);
-    if (recovery && JSON.stringify(recovery.document) !== JSON.stringify(p.editorDraft)) {
+    if (
+      recovery &&
+      (JSON.stringify(recovery.document) !== JSON.stringify(p.editorDraft) ||
+        (recovery.draftVoxelSize ?? null) !== (p.editorDraftVoxelSize ?? null))
+    ) {
       setPendingRecovery(recovery);
       setNotice('Unsaved sculpt work is available for recovery.');
     }
@@ -234,7 +253,12 @@ export default function ProjectStudio() {
             ...(activeAsset
               ? [{ type: 'asset.put', asset: sculptedAsset(activeAsset, recovery.document) }]
               : []),
-            { type: 'editor.set', assetId: recovery.assetId, draft: recovery.document },
+            {
+              type: 'editor.set',
+              assetId: recovery.assetId,
+              draft: recovery.document,
+              draftVoxelSize: recovery.draftVoxelSize ?? null,
+            },
           ];
           const result = await apiJson(`/api/projects/${p.id}/transactions`, {
             method: 'POST',
@@ -265,7 +289,7 @@ export default function ProjectStudio() {
       });
     return saving.current;
   }
-  const changedDraft = (document: ModelDocument) => {
+  const changedDraft = (document: ModelDocument, draftVoxelSize?: number) => {
     const p = current.current;
     if (!p) return;
     const recovery: DraftRecovery = {
@@ -273,6 +297,7 @@ export default function ProjectStudio() {
       baseRevision: dirty.current?.baseRevision ?? p.revision,
       assetId: p.activeAssetId,
       document,
+      draftVoxelSize: draftVoxelSize ?? null,
       updatedAt: Math.max(Date.now(), (dirty.current?.updatedAt ?? 0) + 1),
     };
     dirty.current = recovery;
@@ -304,7 +329,11 @@ export default function ProjectStudio() {
         update(p);
         setNotice('Ready. Generate an asset or open an example to begin.');
         const recovery = await readRecovery(p.id);
-        if (recovery && JSON.stringify(recovery.document) !== JSON.stringify(p.editorDraft))
+        if (
+          recovery &&
+          (JSON.stringify(recovery.document) !== JSON.stringify(p.editorDraft) ||
+            (recovery.draftVoxelSize ?? null) !== (p.editorDraftVoxelSize ?? null))
+        )
           setPendingRecovery(recovery);
         void migrateLegacyProject(p)
           .then((migration) => {
@@ -324,6 +353,9 @@ export default function ProjectStudio() {
         const session = await apiJson('/api/session');
         if (!disposed) {
           setHosted(!!session.hosted);
+          setNativeGameExport(
+            Array.isArray(session.gameTargets) && session.gameTargets.includes('windows-exe'),
+          );
           setConfiguration(
             session.hosted
               ? `In ChatGPT or Codex, open Plugins → Personal → Created by you → VoxShop, then Install or Connect.\n\nYour agent can inspect projects, generate original assets, edit scenes, run playtests and build playable games.\n\nMCP endpoint: ${session.mcp.url}`
@@ -462,6 +494,11 @@ export default function ProjectStudio() {
               materialType: activeWorld?.generator.palette.materialType ?? 'STANDARD',
             },
           );
+          void viewport.current.resumeMultiplayerRoom().catch((cause) => {
+            setNotice(
+              `Could not resume the saved multiplayer player: ${cause instanceof Error ? cause.message : String(cause)}`,
+            );
+          });
         } else if (!playing) viewport.current.load(project);
         viewport.current.onTerrainEdit = (projectId, worldId, edits) => {
           terrainEditQueue.current = terrainEditQueue.current.then(async () => {
@@ -532,7 +569,7 @@ export default function ProjectStudio() {
   const selectAsset = async (a: Asset, sculpt = false) => {
     await flushDraft();
     dirty.current = null;
-    await apply([{ type: 'editor.set', assetId: a.id, draft: a.model }], 'Open asset');
+    await apply([{ type: 'editor.set', assetId: a.id, draft: a.model, draftVoxelSize: null }], 'Open asset');
     setAssetId(a.id);
     setSelected(null);
     if (sculpt) {
@@ -540,28 +577,35 @@ export default function ProjectStudio() {
       setMode('sculpt');
     }
   };
-  const saveAsset = async (name: string, model: ModelDocument) => {
+  const saveAsset = async (name: string, model: ModelDocument, voxelSize?: number) => {
     await flushDraft();
     const p = current.current!;
+    const importedVoxelSize = voxelSize ?? p.editorDraftVoxelSize ?? undefined;
     const existing = p.assets.find((a) => a.id === p.activeAssetId),
       id = existing?.id ?? uid();
     await apply(
       [
         {
           type: 'asset.put',
-          asset: {
-            ...(existing ?? {
-              voxelSize: 0.1,
-              pivot: [0, 0, 0],
-              rig: null,
-              source: { kind: 'authored', description: '' },
-            }),
-            id,
-            name,
+          asset: sculptedAsset(
+            {
+              ...(existing ?? {
+                model,
+                voxelSize: 0.1,
+                pivot: [0, 0, 0],
+                rig: null,
+                source: { kind: 'authored', description: '' },
+              }),
+              id,
+              name,
+              ...(importedVoxelSize !== undefined
+                ? importedMeshAssetFields(model, importedVoxelSize)
+                : { voxelSize: existing?.voxelSize ?? 0.1 }),
+            },
             model,
-          },
+          ),
         },
-        { type: 'editor.set', assetId: id, draft: model },
+        { type: 'editor.set', assetId: id, draft: model, draftVoxelSize: null },
       ],
       'Save sculpted asset',
     );
@@ -630,7 +674,7 @@ export default function ProjectStudio() {
     const result = await waitJob(
       await apiJson(`/api/projects/${p.id}/build`, {
         method: 'POST',
-        body: JSON.stringify({ sceneId: p.activeSceneId }),
+        body: JSON.stringify({ sceneId: p.activeSceneId, target: gameTarget }),
       }),
     );
     const response = await localApi(`/api/games/${result.filename}`);
@@ -750,13 +794,27 @@ export default function ProjectStudio() {
         <button className="studio-connect-agent" onClick={() => setAgent(!agent)} aria-expanded={agent}>
           Connect agent
         </button>
-        <button
-          className="studio-primary studio-export-game"
-          disabled={!project || busy}
-          onClick={() => void run(build)}
-        >
-          Export game
-        </button>
+        <div className="studio-export-controls">
+          <select
+            aria-label="Game export format"
+            value={gameTarget}
+            disabled={!project || busy}
+            title="Browser HTML runs offline in a browser. Windows EXE needs Microsoft WebView2 and a bundled game player."
+            onChange={(event) => setGameTarget(event.target.value as 'html' | 'windows-exe')}
+          >
+            <option value="html">Browser HTML</option>
+            <option value="windows-exe" disabled={!nativeGameExport}>
+              Windows EXE{nativeGameExport ? '' : ' · desktop build'}
+            </option>
+          </select>
+          <button
+            className="studio-primary studio-export-game"
+            disabled={!project || busy}
+            onClick={() => void run(build)}
+          >
+            Export game
+          </button>
+        </div>
       </header>
       <nav className="studio-toolbar" aria-label="Workspace">
         <button
@@ -924,14 +982,30 @@ export default function ProjectStudio() {
                 if (r.projectId !== p.id) throw new Error('Open the recovery’s original project first.');
                 const id = uid();
                 const original = p.assets.find((asset) => asset.id === r.assetId);
-                const recovered = original
+                const importedVoxelSize = r.draftVoxelSize ?? undefined;
+                const recoveredBase: Asset = original
                   ? {
                       ...sculptedAsset(original, r.document),
                       id,
                       name: 'Recovered sculpt',
                       variantOf: original.id,
+                      ...(importedVoxelSize !== undefined &&
+                        importedMeshAssetFields(r.document, importedVoxelSize)),
                     }
-                  : { id, name: 'Recovered sculpt', model: r.document };
+                  : {
+                      id,
+                      name: 'Recovered sculpt',
+                      model: r.document,
+                      ...(importedVoxelSize !== undefined
+                        ? importedMeshAssetFields(r.document, importedVoxelSize)
+                        : {
+                            voxelSize: 0.1,
+                            pivot: [0, 0, 0] as [number, number, number],
+                            source: { kind: 'authored' as const, description: '' },
+                          }),
+                      rig: null,
+                    };
+                const recovered = sculptedAsset(recoveredBase, r.document);
                 const result = await apiJson(`/api/projects/${p.id}/transactions`, {
                   method: 'POST',
                   body: JSON.stringify({
@@ -940,7 +1014,7 @@ export default function ProjectStudio() {
                     label: 'Recover sculpt asset',
                     operations: [
                       { type: 'asset.put', asset: recovered },
-                      { type: 'editor.set', assetId: id, draft: r.document },
+                      { type: 'editor.set', assetId: id, draft: r.document, draftVoxelSize: null },
                     ],
                   }),
                 });
@@ -1297,6 +1371,7 @@ export default function ProjectStudio() {
                   embedded
                   active={mode === 'sculpt'}
                   initialDocument={draft}
+                  initialDraftVoxelSize={project?.editorDraftVoxelSize ?? null}
                   onDocumentChange={changedDraft}
                   onSaveAsset={saveAsset}
                 />

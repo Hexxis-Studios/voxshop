@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,6 +12,7 @@ import {
   assetSchema,
   identityTransform,
   newProject,
+  projectAuthoringView,
   validateProject,
 } from '../services/projectDocument';
 import { createModelDocument } from '../services/modelDocument';
@@ -77,6 +78,87 @@ test('project transactions persist, reject invalid references atomically, and re
     'Fox',
     'Mutating a commit response cannot alter the saved project.',
   );
+});
+test('imported sculpt draft voxel size survives restart and history, then clears when an authored asset opens', async (t) => {
+  const scratchRoot = path.resolve(process.cwd(), '.voxshop/engine-development/completion-20261025');
+  const directory = path.join(scratchRoot, `scale-draft-store-${randomUUID()}`);
+  assert.ok(directory.startsWith(`${scratchRoot}${path.sep}`));
+  await fs.mkdir(directory, { recursive: true });
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const store = new ProjectStore(directory);
+  await store.create('Project', 'project');
+  const importedVoxelSize = 0.14498056769728357;
+  const draft = createModelDocument([{ x: 0, y: -11, z: 0, color: 0x6b87a8 }]);
+  const imported = await store.commit('project', {
+    expectedRevision: 0,
+    requestId: 'import-scale-draft',
+    operations: [{ type: 'editor.set', assetId: null, draft, draftVoxelSize: importedVoxelSize }],
+  });
+  assert.equal(imported.project.editorDraftVoxelSize, importedVoxelSize);
+  assert.deepEqual(imported.project.editorDraft?.voxels, draft.voxels);
+
+  const restart = new ProjectStore(directory);
+  const reopened = await restart.read('project');
+  assert.equal(reopened.editorDraftVoxelSize, importedVoxelSize);
+  assert.deepEqual(reopened.editorDraft?.voxels, draft.voxels);
+  assert.equal('editorDraftVoxelSize' in projectAuthoringView(reopened), false);
+  const legacy = structuredClone(reopened);
+  delete legacy.editorDraftVoxelSize;
+  assert.equal(validateProject(legacy).editorDraftVoxelSize, undefined);
+
+  const undone = await restart.history('project', 'undo', {
+    expectedRevision: 1,
+    requestId: 'undo-import-scale-draft',
+  });
+  assert.equal(undone.project.editorDraftVoxelSize, null);
+  const redone = await restart.history('project', 'redo', {
+    expectedRevision: 2,
+    requestId: 'redo-import-scale-draft',
+  });
+  assert.equal(redone.project.editorDraftVoxelSize, importedVoxelSize);
+
+  const importedAsset = assetSchema.parse({
+    id: 'imported-asset',
+    name: 'Imported mesh',
+    model: draft,
+    voxelSize: importedVoxelSize,
+    pivot: [0, -11, 0],
+    source: { kind: 'imported', description: 'Voxelized 3D mesh import' },
+  });
+  const saved = await restart.commit('project', {
+    expectedRevision: 3,
+    requestId: 'save-imported-scale-draft',
+    operations: [
+      { type: 'asset.put', asset: importedAsset },
+      { type: 'editor.set', assetId: importedAsset.id, draft, draftVoxelSize: null },
+    ],
+  });
+  const storedAsset = saved.project.assets.find((asset) => asset.id === importedAsset.id)!;
+  assert.equal(storedAsset.voxelSize, importedVoxelSize);
+  assert.deepEqual(storedAsset.pivot, [0, -11, 0]);
+  assert.equal(storedAsset.source.kind, 'imported');
+  assert.equal(
+    saved.project.editorDraftVoxelSize,
+    null,
+    'saving moves the hint into the asset and clears the draft',
+  );
+
+  const authored = assetSchema.parse({
+    id: 'authored-asset',
+    name: 'Authored asset',
+    model: createModelDocument([{ x: 0, y: 0, z: 0, color: 0x123456 }]),
+    voxelSize: 0.1,
+    source: { kind: 'authored', description: '' },
+  });
+  const opened = await restart.commit('project', {
+    expectedRevision: 4,
+    requestId: 'open-authored-asset',
+    operations: [
+      { type: 'asset.put', asset: authored },
+      { type: 'editor.set', assetId: authored.id, draft: authored.model },
+    ],
+  });
+  assert.equal(opened.project.editorDraftVoxelSize, null);
 });
 test('sparse asset-only commits preserve cap-scale history and persisted caller isolation', async (t) => {
   const { store, directory } = await fixture(t);

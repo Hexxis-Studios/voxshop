@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { compileGameFormula } from './gameFormula';
 import { createModelDocument, voxelKey, type ModelDocument } from './modelDocument';
 import {
   applyVoxelCommand,
@@ -297,32 +298,54 @@ const audioClipBytes = (clip: AudioClipDocument) => {
 };
 
 // A bounded event/action language is also the custom-logic extension API. No eval or shell.
+const gameFormulaSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .superRefine((source, context) => {
+    try {
+      compileGameFormula(source);
+    } catch (error) {
+      context.addIssue({ code: 'custom', message: (error as Error).message });
+    }
+  })
+  .describe(
+    'Optional arithmetic expression replacing value (which defaults to 0). Reads scene("id"), campaign("id"), item("id"), health("node-id"), time, frame and pi; supports + - * / %, parentheses, min/max/abs/floor/ceil/round/sqrt/pow/clamp. No JavaScript or external calls.',
+  );
 const rawActionSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('set'),
-    variable: idSchema,
-    value: z.number().finite(),
-    scope: z
-      .enum(['scene', 'campaign'])
-      .optional()
-      .describe('Defaults to scene-local; campaign variables persist across scenes.'),
-  }),
-  z.object({
-    type: z.literal('add'),
-    variable: idSchema,
-    value: z.number().finite(),
-    scope: z
-      .enum(['scene', 'campaign'])
-      .optional()
-      .describe('Defaults to scene-local; campaign variables persist across scenes.'),
-  }),
-  z.object({ type: z.literal('destroy'), target: actionTargetSchema.optional() }),
-  z.object({ type: z.literal('enable'), target: idSchema, value: z.boolean() }),
-  z.object({
-    type: z.literal('emit'),
-    eventId: idSchema.describe('Dispatch this named signal to enabled rules listening for the same ID.'),
-  }),
-  z.object({ type: z.literal('message'), text: z.string().max(500) }),
+  z
+    .object({
+      type: z.literal('set'),
+      variable: idSchema,
+      value: z.number().finite().default(0),
+      formula: gameFormulaSchema.optional(),
+      scope: z
+        .enum(['scene', 'campaign'])
+        .optional()
+        .describe('Defaults to scene-local; campaign variables persist across scenes.'),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('add'),
+      variable: idSchema,
+      value: z.number().finite().default(0),
+      formula: gameFormulaSchema.optional(),
+      scope: z
+        .enum(['scene', 'campaign'])
+        .optional()
+        .describe('Defaults to scene-local; campaign variables persist across scenes.'),
+    })
+    .strict(),
+  z.object({ type: z.literal('destroy'), target: actionTargetSchema.optional() }).strict(),
+  z.object({ type: z.literal('enable'), target: idSchema, value: z.boolean() }).strict(),
+  z
+    .object({
+      type: z.literal('emit'),
+      eventId: idSchema.describe('Dispatch this named signal to enabled rules listening for the same ID.'),
+    })
+    .strict(),
+  z.object({ type: z.literal('message'), text: z.string().max(500) }).strict(),
   z
     .object({
       type: z.literal('sound'),
@@ -332,48 +355,65 @@ const rawActionSchema = z.discriminatedUnion('type', [
       duration: z.number().finite().min(0.02).max(2).default(0.15),
       volume: z.number().finite().min(0).max(1).default(0.5),
     })
+    .strict()
     .describe('Play one bounded procedural oscillator cue; no audio file or external service is required.'),
-  z.object({
-    type: z.literal('audio'),
-    clipId: idSchema,
-    volume: z.number().finite().min(0).max(1).default(1),
-  }),
-  z.object({ type: z.literal('win') }),
-  z.object({ type: z.literal('lose') }),
-  z.object({
-    type: z.literal('damage'),
-    target: actionTargetSchema.optional(),
-    amount: z.number().positive().max(10000),
-  }),
-  z.object({
-    type: z.literal('heal'),
-    target: actionTargetSchema.optional(),
-    amount: z.number().positive().max(10000),
-  }),
-  z.object({ type: z.literal('teleport'), target: actionTargetSchema.optional(), position: vectorSchema }),
-  z.object({
-    type: z.literal('craft'),
-    recipeId: idSchema,
-    batches: z.number().int().min(1).max(99).default(1),
-  }),
-  z.object({ type: z.literal('transition'), sceneId: idSchema }),
-  z.object({
-    type: z.literal('spawn'),
-    prefabId: idSchema,
-    position: vectorSchema.optional(),
-    offset: vectorSchema.optional(),
-    rotation: vectorSchema
-      .optional()
-      .describe('Optional Euler XYZ rotation in radians for the prefab root; omitted rotation is inherited.'),
-    scale: scaleSchema
-      .optional()
-      .describe('Optional positive per-axis scale for the prefab root; omitted scale is inherited.'),
-  }),
-  z.object({
-    type: z.literal('inventory'),
-    remove: z.array(inventoryActionItemSchema).max(16).default([]),
-    add: z.array(inventoryActionItemSchema).max(16).default([]),
-  }),
+  z
+    .object({
+      type: z.literal('audio'),
+      clipId: idSchema,
+      volume: z.number().finite().min(0).max(1).default(1),
+    })
+    .strict(),
+  z.object({ type: z.literal('win') }).strict(),
+  z.object({ type: z.literal('lose') }).strict(),
+  z
+    .object({
+      type: z.literal('damage'),
+      target: actionTargetSchema.optional(),
+      amount: z.number().positive().max(10000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('heal'),
+      target: actionTargetSchema.optional(),
+      amount: z.number().positive().max(10000),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal('teleport'), target: actionTargetSchema.optional(), position: vectorSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal('craft'),
+      recipeId: idSchema,
+      batches: z.number().int().min(1).max(99).default(1),
+    })
+    .strict(),
+  z.object({ type: z.literal('transition'), sceneId: idSchema }).strict(),
+  z
+    .object({
+      type: z.literal('spawn'),
+      prefabId: idSchema,
+      position: vectorSchema.optional(),
+      offset: vectorSchema.optional(),
+      rotation: vectorSchema
+        .optional()
+        .describe(
+          'Optional Euler XYZ rotation in radians for the prefab root; omitted rotation is inherited.',
+        ),
+      scale: scaleSchema
+        .optional()
+        .describe('Optional positive per-axis scale for the prefab root; omitted scale is inherited.'),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('inventory'),
+      remove: z.array(inventoryActionItemSchema).max(16).default([]),
+      add: z.array(inventoryActionItemSchema).max(16).default([]),
+    })
+    .strict(),
 ]);
 export const actionSchema = rawActionSchema.superRefine((action, context) => {
   if (action.type === 'spawn') {
@@ -1036,6 +1076,7 @@ export const projectSchema = z.object({
   activeSceneId: idSchema,
   activeAssetId: idSchema.nullable(),
   editorDraft: modelSchema.nullable(),
+  editorDraftVoxelSize: z.number().positive().min(0.001).max(100).nullable().optional(),
 });
 export type ProjectDocument = z.infer<typeof projectSchema>;
 export type AssetEditHistoryEntry = {
@@ -1575,6 +1616,7 @@ export function newProject(id: string, name: string): ProjectDocument {
     activeSceneId: 'main',
     activeAssetId: null,
     editorDraft: null,
+    editorDraftVoxelSize: null,
   });
 }
 
@@ -1855,6 +1897,7 @@ export const operationSchema = z.discriminatedUnion('type', [
     sceneId: idSchema.optional(),
     assetId: idSchema.nullable().optional(),
     draft: modelSchema.nullable().optional(),
+    draftVoxelSize: z.number().positive().min(0.001).max(100).nullable().optional(),
   }),
 ]);
 export type ProjectOperation = z.input<typeof operationSchema>;
@@ -1937,8 +1980,10 @@ function applyStoredAssetEdits(
     throw new Error('An asset may contain at most 250,000 voxels.');
   if (project.assets.reduce((count, asset) => count + asset.model.voxels.length, 0) > 1000000)
     throw new Error('Project exceeds one million voxels.');
-  if (project.activeAssetId && edited.has(project.activeAssetId))
+  if (project.activeAssetId && edited.has(project.activeAssetId)) {
     project.editorDraft = structuredClone(edited.get(project.activeAssetId)!.model);
+    project.editorDraftVoxelSize = null;
+  }
   return { project, history };
 }
 
@@ -1980,7 +2025,10 @@ export function applyProjectOperations(input: ProjectDocument, operations: unkno
         const i = p.assets.findIndex((a) => a.id === op.asset.id);
         if (i < 0) p.assets.push(op.asset);
         else p.assets[i] = op.asset;
-        if (p.activeAssetId === op.asset.id) p.editorDraft = structuredClone(op.asset.model);
+        if (p.activeAssetId === op.asset.id) {
+          p.editorDraft = structuredClone(op.asset.model);
+          p.editorDraftVoxelSize = null;
+        }
         break;
       }
       case 'asset.retarget-animation': {
@@ -2017,6 +2065,7 @@ export function applyProjectOperations(input: ProjectDocument, operations: unkno
         if (p.activeAssetId === op.id) {
           p.activeAssetId = null;
           p.editorDraft = null;
+          p.editorDraftVoxelSize = null;
         }
         break;
       case 'asset.generate':
@@ -2053,7 +2102,10 @@ export function applyProjectOperations(input: ProjectDocument, operations: unkno
           a.model.voxels,
           createVoxelEdit(a.model.voxels, op.edit as VoxelEdit),
         );
-        if (p.activeAssetId === op.id) p.editorDraft = structuredClone(a.model);
+        if (p.activeAssetId === op.id) {
+          p.editorDraft = structuredClone(a.model);
+          p.editorDraftVoxelSize = null;
+        }
         break;
       }
       case 'asset.variant':
@@ -2281,8 +2333,11 @@ export function applyProjectOperations(input: ProjectDocument, operations: unkno
       }
       case 'editor.set':
         if (op.sceneId !== undefined) p.activeSceneId = op.sceneId;
+        if (op.assetId !== undefined && op.assetId !== p.activeAssetId) p.editorDraftVoxelSize = null;
         if (op.assetId !== undefined) p.activeAssetId = op.assetId;
         if (op.draft !== undefined) p.editorDraft = op.draft;
+        if (op.draftVoxelSize !== undefined) p.editorDraftVoxelSize = op.draftVoxelSize;
+        else if (op.draft !== undefined) p.editorDraftVoxelSize = null;
         break;
     }
   }
@@ -2339,8 +2394,10 @@ export function applyProjectAssetEditHistory(
     throw new Error('An asset may contain at most 250,000 voxels.');
   if (project.assets.reduce((count, asset) => count + asset.model.voxels.length, 0) > 1000000)
     throw new Error('Project exceeds one million voxels.');
-  if (project.activeAssetId && edited.has(project.activeAssetId))
+  if (project.activeAssetId && edited.has(project.activeAssetId)) {
     project.editorDraft = structuredClone(edited.get(project.activeAssetId)!.model);
+    project.editorDraftVoxelSize = null;
+  }
   return project;
 }
 
@@ -2383,7 +2440,7 @@ export function projectSummary(p: ProjectDocument) {
 
 /** Project detail for authoring tools, with large voxel arrays available separately through asset inspection. */
 export function projectAuthoringView(p: ProjectDocument) {
-  const { assets, audioClips, editorDraft, ...document } = p;
+  const { assets, audioClips, editorDraft, editorDraftVoxelSize, ...document } = p;
   return {
     ...document,
     audioClips: audioClips.map(({ id, name, mimeType, ...clip }) => ({

@@ -98,12 +98,22 @@ class MemoryStorage implements ProgressStorageLike {
   }
 }
 
+type SavedMultiplayerSession = {
+  projectId: string;
+  revision: number;
+  sceneId: string;
+  websocketUrl: string;
+  gameId: string;
+};
+type MultiplayerSessionState = { value?: SavedMultiplayerSession };
+
 // Execute the real standalone module with WebGL replaced by a session-backed viewport.
 // This checks startup and Save/Load orchestration; it provides no rendering evidence.
 function boot(
   document: ProjectDocument,
   storage: ProgressStorageLike,
   embeddedWorkers?: { terrain?: string; voxel?: string },
+  multiplayerSession: MultiplayerSessionState = {},
 ) {
   class Element {
     tagName = 'div';
@@ -207,7 +217,13 @@ function boot(
       gameId?: string;
       error?: string;
     } = { state: 'disconnected' };
-    joinRequests: { websocketUrl: string; gameId: string; credential: string }[] = [];
+    joinRequests: {
+      websocketUrl: string;
+      gameId: string;
+      credential: string;
+      resumeAfterReload?: boolean;
+    }[] = [];
+    resumeRequests = 0;
     leaveRequests = 0;
     onState?: (state: ReturnType<GameSession['simulation']['inspect']>) => void;
     agentDriven = false;
@@ -247,14 +263,44 @@ function boot(
     multiplayerInfo() {
       return { ...this.multiplayer };
     }
-    joinMultiplayerRoom(options: { websocketUrl: string; gameId: string; credential: string }) {
+    joinMultiplayerRoom(options: {
+      websocketUrl: string;
+      gameId: string;
+      credential: string;
+      resumeAfterReload?: boolean;
+    }) {
       this.joinRequests.push({ ...options });
       this.multiplayer = { state: 'connected', playerId: 'player-1', gameId: options.gameId };
+      multiplayerSession.value = options.resumeAfterReload
+        ? {
+            projectId: document.id,
+            revision: document.revision,
+            sceneId: document.activeSceneId,
+            websocketUrl: options.websocketUrl,
+            gameId: options.gameId,
+          }
+        : undefined;
       return Promise.resolve();
+    }
+    resumeMultiplayerRoom(): Promise<boolean> {
+      this.resumeRequests++;
+      const saved = multiplayerSession.value;
+      if (!saved) return Promise.resolve(false);
+      if (
+        saved.projectId !== document.id ||
+        saved.revision !== document.revision ||
+        saved.sceneId !== document.activeSceneId
+      ) {
+        multiplayerSession.value = undefined;
+        return Promise.resolve(false);
+      }
+      this.multiplayer = { state: 'connected', playerId: 'player-1', gameId: saved.gameId };
+      return Promise.resolve(true);
     }
     leaveMultiplayerRoom() {
       this.leaveRequests++;
       this.multiplayer = { state: 'disconnected' };
+      multiplayerSession.value = undefined;
       return Promise.resolve();
     }
     play(agentDriven = false, progress?: unknown, sceneId = document.activeSceneId) {
@@ -419,6 +465,7 @@ function boot(
         websocketUrl: string;
         gameId: string;
         credential: string;
+        resumeAfterReload?: boolean;
       }): Promise<void>;
       leaveMultiplayerRoom(): Promise<void>;
     },
@@ -517,6 +564,49 @@ test('standalone multiplayer join is opt-in, keeps credentials in memory, and pr
       assert.equal(app.element(id).disabled, false, `${id} available again after leaving`);
   } finally {
     app.viewport.dispose();
+  }
+});
+
+test('standalone reload resumes only a saved opt-in session and Leave clears it', async () => {
+  const authored = validateProject(project()),
+    storage = new MemoryStorage(),
+    multiplayerSession: MultiplayerSessionState = {};
+  const first = boot(authored, storage, undefined, multiplayerSession);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(first.viewport.resumeRequests, 1);
+  assert.equal(first.viewport.multiplayerInfo().state, 'disconnected');
+
+  first.element('multiplayer-endpoint').value = 'wss://rooms.example.test/multiplayer';
+  first.element('multiplayer-room-id').value = 'resume_room';
+  first.element('multiplayer-credential').value = 'R'.repeat(43);
+  first.element('multiplayer-resume-after-reload').checked = true;
+  first.element('multiplayer-form').dispatchEvent({ type: 'submit', preventDefault() {} });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(first.viewport.joinRequests[0]?.resumeAfterReload, true);
+  assert.equal(multiplayerSession.value?.gameId, 'resume_room');
+  assert.equal('credential' in multiplayerSession.value!, false);
+  first.viewport.dispose();
+
+  const reloaded = boot(authored, storage, undefined, multiplayerSession);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(reloaded.viewport.resumeRequests, 1);
+  assert.equal(reloaded.viewport.multiplayerInfo().state, 'connected');
+  assert.equal(reloaded.element('multiplayer-resume-after-reload').checked, true);
+
+  reloaded.element('multiplayer-leave').disabled = false;
+  reloaded.element('multiplayer-leave').dispatchEvent({ type: 'click' });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(multiplayerSession.value, undefined);
+  reloaded.viewport.dispose();
+
+  const afterLeave = boot(authored, storage, undefined, multiplayerSession);
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(afterLeave.viewport.resumeRequests, 1);
+    assert.equal(afterLeave.viewport.multiplayerInfo().state, 'disconnected');
+    assert.equal(afterLeave.element('multiplayer-resume-after-reload').checked, false);
+  } finally {
+    afterLeave.viewport.dispose();
   }
 });
 

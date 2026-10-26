@@ -35,6 +35,7 @@ const env = {
   VOXSHOP_ROOT: resourcesRoot,
   VOXSHOP_DATA_DIR: dataDir,
   VOXSHOP_PORT: '0',
+  VOXSHOP_MULTIPLAYER_PORT: '0',
 };
 
 function launchSidecar() {
@@ -90,6 +91,9 @@ try {
   const session = await sessionResponse.json();
   assert.equal(session.publisher, 'Hexxis Studios');
   assert.equal(session.appVersion, '2.0.0-alpha.1');
+  const multiplayerUrl = new URL(session.multiplayer.websocketUrl);
+  assert.equal(multiplayerUrl.protocol, 'ws:');
+  assert.notEqual(multiplayerUrl.port, '4270', 'The smoke test must use an isolated multiplayer port.');
   assert.equal(session.mcp.command, executable);
   assert.equal(session.mcp.args[0], path.join(resourcesRoot, 'dist-server', 'mcp', 'server.js'));
   assert.equal(session.mcp.env.VOXSHOP_ROOT, resourcesRoot);

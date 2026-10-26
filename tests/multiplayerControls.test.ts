@@ -45,6 +45,28 @@ test('multiplayer join validation rejects unsafe endpoints and malformed room se
     );
   assert.throws(() => validateMultiplayerRoomOptions({ ...valid, gameId: '../room' }), /Room ID/);
   assert.throws(() => validateMultiplayerRoomOptions({ ...valid, credential: 'short' }), /Room credential/);
+  assert.throws(
+    () => validateMultiplayerRoomOptions({ ...valid, websocketUrl: `wss://${'a'.repeat(2048)}` }),
+    /2048 characters or fewer/,
+  );
+});
+
+test('saved tab resume options accept only the bounded rotating token without a room secret', () => {
+  const resumeCredential = 'R'.repeat(43);
+  assert.deepEqual(
+    validateMultiplayerRoomOptions({
+      websocketUrl: 'wss://rooms.example.test/multiplayer',
+      gameId: 'room',
+      resumeCredential,
+      resumeAfterReload: true,
+    }),
+    {
+      websocketUrl: 'wss://rooms.example.test/multiplayer',
+      gameId: 'room',
+      resumeCredential,
+      resumeAfterReload: true,
+    },
+  );
 });
 
 test('multiplayer connection status is readable without showing room credentials', () => {
@@ -59,7 +81,7 @@ test('multiplayer connection status is readable without showing room credentials
   );
   assert.equal(
     presentMultiplayerError('Multiplayer join failed: invalid-credential.'),
-    'Room credential was rejected. Check it and try again.',
+    'Room or saved resume credential was rejected. Check the room details and try again.',
   );
   assert.equal(
     presentMultiplayerError('This room uses a different project.'),

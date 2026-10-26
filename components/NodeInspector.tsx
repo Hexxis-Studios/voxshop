@@ -10,7 +10,7 @@ import { addComponent, availableComponentTypes } from './componentAuthoring';
 import { ConstructionEditor } from './ConstructionEditor';
 import { RigEditor } from './RigEditor';
 import { RuleEditor } from './RuleEditor';
-import { NumberField, TextField, VectorField } from './InspectorFields';
+import { DraftRecovery, NumberField, TextField, VectorField } from './InspectorFields';
 import { PlayerControlsEditor } from './PlayerControlsEditor';
 import { resolvePlayerControls } from '../services/playerControls';
 
@@ -28,20 +28,24 @@ export function NodeInspector({
   const [draft, setDraft] = useState<SceneNode>(structuredClone(node)),
     [dirty, setDirty] = useState(false),
     [advanced, setAdvanced] = useState(''),
+    [advancedDirty, setAdvancedDirty] = useState(false),
     [error, setError] = useState(''),
     [type, setType] = useState<Component['type']>('collider');
   const base = useRef(project.revision),
     id = useRef(node.id);
+  const hasLocalEdits = dirty || advancedDirty,
+    draftConflict = hasLocalEdits && project.revision !== base.current;
   useEffect(() => {
-    if (id.current !== node.id || !dirty) {
+    if (id.current !== node.id || !hasLocalEdits) {
       id.current = node.id;
       base.current = project.revision;
       setDraft(structuredClone(node));
       setAdvanced(JSON.stringify(node.components, null, 2));
+      setAdvancedDirty(false);
       setDirty(false);
       setError('');
     }
-  }, [node, project.revision]);
+  }, [node, project.revision, hasLocalEdits]);
   const change = (next: SceneNode) => {
     setDraft(next);
     setDirty(true);
@@ -712,7 +716,7 @@ export function NodeInspector({
       </div>
       <details
         onToggle={(e) => {
-          if (e.currentTarget.open) setAdvanced(JSON.stringify(draft.components, null, 2));
+          if (e.currentTarget.open && !advancedDirty) setAdvanced(JSON.stringify(draft.components, null, 2));
         }}
       >
         <summary>Advanced behaviors · API v1</summary>
@@ -723,7 +727,10 @@ export function NodeInspector({
           aria-label="Behavior JSON"
           rows={14}
           value={advanced}
-          onChange={(e) => setAdvanced(e.target.value)}
+          onChange={(e) => {
+            setAdvanced(e.target.value);
+            setAdvancedDirty(true);
+          }}
         />
         <button
           type="button"
@@ -732,6 +739,7 @@ export function NodeInspector({
               const value = JSON.parse(advanced);
               if (!Array.isArray(value)) throw new Error('Expected a component array.');
               change({ ...draft, components: value });
+              setAdvancedDirty(false);
               setError('');
             } catch (e) {
               setError((e as Error).message);
@@ -901,14 +909,25 @@ export function NodeInspector({
           {error}
         </p>
       )}
-      {dirty && project.revision !== base.current && (
-        <p className="studio-error">
-          The project changed while you were editing. Applying will check revision {base.current}; reload this
-          selection to use newer values.
-        </p>
+      {draftConflict && (
+        <DraftRecovery
+          kind="object"
+          baseRevision={base.current}
+          currentRevision={project.revision}
+          draft={{ node: draft, behaviorText: advanced }}
+          onReload={() => {
+            setDraft(structuredClone(node));
+            setAdvanced(JSON.stringify(node.components, null, 2));
+            setAdvancedDirty(false);
+            setDirty(false);
+            base.current = project.revision;
+            setError('');
+          }}
+        />
       )}
+      {advancedDirty && <p>Use the edited behavior JSON in the draft before applying object changes.</p>}
       <div className="studio-sticky-actions">
-        <button className="studio-primary" type="submit" disabled={!dirty}>
+        <button className="studio-primary" type="submit" disabled={!dirty || advancedDirty || draftConflict}>
           Apply object changes
         </button>
         <button
@@ -917,6 +936,8 @@ export function NodeInspector({
             setDirty(false);
             base.current = project.revision;
             setDraft(structuredClone(node));
+            setAdvanced(JSON.stringify(node.components, null, 2));
+            setAdvancedDirty(false);
             setError('');
           }}
         >

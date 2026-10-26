@@ -1,14 +1,19 @@
-# Windows game export
+# Export a Windows game
 
-Build one scene to the existing standalone HTML format, then package that file as a Windows app:
+In the Windows desktop editor, select **Windows EXE** beside **Export game**. VoxShop packages your game, assets and runtime into a standalone executable using the player bundled with the editor; export does not build a new native player. The player does not need VoxShop, Node.js, Rust, an AI account or a running editor service. Microsoft WebView2 Evergreen must be installed on the player's Windows system.
 
-```powershell
-npm run desktop:game:stage -- .voxshop\exports\game.html
-npm run desktop:game:build -- .voxshop\exports\game.html
+The game window uses your project's title. Engine and dependency licenses are available in the game menu; they do not claim authorship of your game or require a splash screen.
+
+Each exported executable isolates its local game storage. Re-exporting after changing the game creates a separate storage identity. Use **Export save** and **Import save** in the game menu to move compatible progress to an updated export. Keep a portable project backup separately for further editing.
+
+**Browser HTML** remains available in every build. Open that file in a compatible browser, or host it as a static game. Windows EXE is enabled only when the editor includes its prebuilt Windows player.
+
+## Build a game installer from source
+
+Developers who need a game-specific Windows installer can export Browser HTML and run:
+
+```sh
+npm run desktop:game:build -- path/to/game.html
 ```
 
-The staging command validates the embedded game payload and writes a game-specific Tauri config plus an unchanged `index.html` under `.voxshop/game-player/`. The build command produces an NSIS installer under `.voxshop/game-player/target/release/bundle/nsis/`. The installer embeds the game and uses the Windows WebView2 runtime; it does not start the VoxShop editor, Node sidecar, project server, or MCP service. WebView2 is downloaded by the installer only if it is missing.
-
-The staged `frontendDist` is an array containing the exact HTML file, with `index.html` as the window URL. An absolute Windows directory string can be parsed as a URL by Tauri and show a folder index instead of embedding the game. The player's content policy permits embedded WebAssembly for Rapier and the same optional secure/loopback multiplayer connections as browser exports; it keeps general JavaScript eval disabled. Campaign saves use the game-specific app identity and survive player relaunch.
-
-This first player target is Windows-only. It keeps the standalone HTML export available. Native project schema versions are unchanged.
+This path requires the [Windows desktop build prerequisites](desktop.md). It embeds the exact HTML file in a game-specific Tauri app, retaining the original HTML export. The staging command validates embedded game data and generates its configuration; it never reads other projects from the export folder.

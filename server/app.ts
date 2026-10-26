@@ -13,6 +13,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { createExample, exampleKinds, exampleTests } from '../services/examples';
 import { playtestSchema, runPlaytest } from '../runtime/playtest';
 import { buildGame } from './gameBuild';
+import { buildNativeGame, nativeGamePlayerAvailable } from './nativeGameExport';
 import { ViewportBridge, viewportRoutes } from './viewport';
 import { APP_VERSION, APP_PUBLISHER } from '../services/appMetadata';
 import { MultiplayerGateway, multiplayerSnapshotInputSchema } from './multiplayer';
@@ -54,6 +55,16 @@ export async function createApp(options: {
   const store = new ProjectStore(path.join(dataDir, 'projects')),
     jobs = new Jobs(),
     events = new EventEmitter();
+  let nativePlayerPath = path.join(root, 'game-player', 'voxshop-game-player.exe');
+  if (!(await nativeGamePlayerAvailable(nativePlayerPath)))
+    nativePlayerPath = path.join(
+      root,
+      '.voxshop',
+      'desktop-runtime',
+      'resources',
+      'game-player',
+      'voxshop-game-player.exe',
+    );
   const multiplayer = new MultiplayerGateway({
     host: options.multiplayerHost,
     publicHost: options.multiplayerPublicHost,
@@ -137,12 +148,13 @@ export async function createApp(options: {
     events.emit('change', { projectId: id, revision: project.revision, activated: true });
     return project;
   };
-  app.get('/api/session', (_req, res) =>
+  app.get('/api/session', async (_req, res) =>
     res.json({
       token,
       version: 1,
       appVersion: APP_VERSION,
       publisher: APP_PUBLISHER,
+      gameTargets: ['html', ...((await nativeGamePlayerAvailable(nativePlayerPath)) ? ['windows-exe'] : [])],
       capabilities: [
         'projects',
         'recipes',
@@ -291,19 +303,40 @@ export async function createApp(options: {
     );
   });
   app.post('/api/projects/:id/build', async (req, res) => {
-    const sceneId = idSchema.parse(req.body.sceneId),
+    const { sceneId, target } = z
+        .object({ sceneId: idSchema, target: z.enum(['html', 'windows-exe']).default('html') })
+        .strict()
+        .parse(req.body),
       project = await store.read(req.params.id);
+    if (target === 'windows-exe' && !(await nativeGamePlayerAvailable(nativePlayerPath)))
+      throw new ServiceError(
+        501,
+        'Windows game export is not included in this editor build. Use a Windows desktop build with its game player, or export browser HTML.',
+      );
     res.status(202).json(
       jobs.start('game-build', async (signal, progress) => {
         progress(0.1);
-        return buildGame(project, sceneId, { root, directory: path.join(dataDir, 'games') }, signal);
+        const html = await buildGame(
+          project,
+          sceneId,
+          { root, directory: path.join(dataDir, 'games') },
+          signal,
+        );
+        if (target === 'html') return html;
+        progress(0.6);
+        const native = await buildNativeGame(
+          html.path,
+          { playerPath: nativePlayerPath, directory: path.join(dataDir, 'games') },
+          signal,
+        );
+        return { ...html, ...native, target };
       }),
     );
   });
   app.get('/api/games/:filename', async (req, res) => {
     const filename = z
       .string()
-      .regex(/^[a-zA-Z0-9_-]+-r\d+\.html$/)
+      .regex(/^[a-zA-Z0-9_-]+-r\d+\.(?:html|exe)$/)
       .parse(req.params.filename);
     res.download(path.join(dataDir, 'games', filename), filename, { dotfiles: 'allow' });
   });

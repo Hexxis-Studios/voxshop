@@ -122,304 +122,318 @@ export function RigEditor({
       ) : (
         <>
           <RigPreview asset={asset} />
-          <section className="studio-component" aria-label="Rig joints">
-            <div>
-              <strong>Joints</strong>
-              <small>{rig.joints.length}/128</small>
-            </div>
-            {rig.joints.map((joint, index) => {
-              const removeBlock = jointRemovalBlock(asset, joint.name, project);
-              const renameBlock =
-                jointEditBlock ??
-                (jointAttachmentUseCount(project, asset.id, joint.name) > 0
-                  ? 'Equipment masks use this joint. Change those references before renaming it.'
-                  : null);
-              return (
-                <article className="studio-catalog-card" key={`${index}:${joint.name}`}>
-                  <label className="studio-field">
-                    Joint {index + 1} name
-                    <input
-                      required
-                      maxLength={64}
-                      pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
-                      value={joint.name}
-                      disabled={Boolean(renameBlock)}
-                      title={renameBlock ?? undefined}
-                      onChange={(event) => {
-                        const nextName = event.target.value;
-                        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(nextName)) return;
-                        try {
-                          const next = renameRigJoint(asset, joint.name, nextName);
-                          onChange(next);
-                          onJsonChange(JSON.stringify(next.rig, null, 2));
-                          setError('');
-                        } catch (cause) {
-                          setError((cause as Error).message);
-                        }
-                      }}
-                    />
-                  </label>
-                  <label className="studio-field">
-                    Parent joint
-                    <select
-                      aria-label={`Joint ${joint.name} parent`}
-                      value={joint.parent ?? ''}
+          <details>
+            <summary>Joint hierarchy and bind pose · {rig.joints.length}/128 joints</summary>
+            <section className="studio-component" aria-label="Rig joints">
+              <div>
+                <strong>Joints</strong>
+                <small>{rig.joints.length}/128</small>
+              </div>
+              {rig.joints.map((joint, index) => {
+                const removeBlock = jointRemovalBlock(asset, joint.name, project);
+                const renameBlock =
+                  jointEditBlock ??
+                  (jointAttachmentUseCount(project, asset.id, joint.name) > 0
+                    ? 'Equipment masks use this joint. Change those references before renaming it.'
+                    : null);
+                return (
+                  <article className="studio-catalog-card" key={`${index}:${joint.name}`}>
+                    <label className="studio-field">
+                      Joint {index + 1} name
+                      <input
+                        required
+                        maxLength={64}
+                        pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+                        value={joint.name}
+                        disabled={Boolean(renameBlock)}
+                        title={renameBlock ?? undefined}
+                        onChange={(event) => {
+                          const nextName = event.target.value;
+                          if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(nextName)) return;
+                          try {
+                            const next = renameRigJoint(asset, joint.name, nextName);
+                            onChange(next);
+                            onJsonChange(JSON.stringify(next.rig, null, 2));
+                            setError('');
+                          } catch (cause) {
+                            setError((cause as Error).message);
+                          }
+                        }}
+                      />
+                    </label>
+                    <label className="studio-field">
+                      Parent joint
+                      <select
+                        aria-label={`Joint ${joint.name} parent`}
+                        value={joint.parent ?? ''}
+                        disabled={Boolean(jointEditBlock)}
+                        onChange={(event) => {
+                          try {
+                            const next = setRigJointParent(rig, joint.name, event.target.value || null);
+                            onChange({ ...asset, rig: next });
+                            onJsonChange(JSON.stringify(next, null, 2));
+                            setError('');
+                          } catch (cause) {
+                            setError((cause as Error).message);
+                          }
+                        }}
+                      >
+                        <option value="">Root</option>
+                        {rig.joints
+                          .filter((candidate) => candidate.name !== joint.name)
+                          .map((candidate) => (
+                            <option key={candidate.name} value={candidate.name}>
+                              {candidate.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <VectorField
+                      label={`Joint ${joint.name} bind position`}
+                      value={joint.position}
+                      min={-100_000}
+                      max={100_000}
                       disabled={Boolean(jointEditBlock)}
-                      onChange={(event) => {
-                        try {
-                          const next = setRigJointParent(rig, joint.name, event.target.value || null);
-                          onChange({ ...asset, rig: next });
-                          onJsonChange(JSON.stringify(next, null, 2));
-                          setError('');
-                        } catch (cause) {
-                          setError((cause as Error).message);
-                        }
-                      }}
-                    >
-                      <option value="">Root</option>
-                      {rig.joints
-                        .filter((candidate) => candidate.name !== joint.name)
-                        .map((candidate) => (
-                          <option key={candidate.name} value={candidate.name}>
-                            {candidate.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <VectorField
-                    label={`Joint ${joint.name} bind position`}
-                    value={joint.position}
-                    min={-100_000}
-                    max={100_000}
-                    disabled={Boolean(jointEditBlock)}
-                    onChange={(position) => updateJoint(joint.name, { position })}
-                  />
-                  <VectorField
-                    label={`Joint ${joint.name} bind rotation (radians)`}
-                    value={joint.rotation}
-                    min={-Math.PI * 2}
-                    max={Math.PI * 2}
-                    disabled={Boolean(jointEditBlock)}
-                    onChange={(rotation) => updateJoint(joint.name, { rotation })}
-                  />
-                  <div className="studio-catalog-card-actions">
-                    {removeBlock && <small>{removeBlock}</small>}
-                    <button
-                      type="button"
-                      aria-label={`Remove joint ${joint.name}`}
-                      disabled={Boolean(removeBlock)}
-                      title={removeBlock ?? undefined}
-                      onClick={() => {
-                        try {
-                          const next = removeRigJoint(asset, joint.name);
-                          onChange(next);
-                          onJsonChange(JSON.stringify(next.rig, null, 2));
-                          setError('');
-                        } catch (cause) {
-                          setError((cause as Error).message);
-                        }
-                      }}
-                    >
-                      Remove joint
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-            {jointEditBlock && <small role="status">{jointEditBlock}</small>}
-            <button
-              type="button"
-              disabled={rig.joints.length >= 128 || Boolean(jointEditBlock)}
-              onClick={() => changeRig(addRigJoint)}
-            >
-              + Add joint
-            </button>
-          </section>
-
-          <section className="studio-component" aria-label="Rig landmarks">
-            <div>
-              <strong>Landmarks</strong>
-              <small>{Object.keys(rig.landmarks).length}</small>
-            </div>
-            {Object.entries(rig.landmarks).map(([name, position], index) => (
-              <article className="studio-catalog-card" key={name}>
-                <label className="studio-field">
-                  <LandmarkNameField
-                    index={index}
-                    name={name}
-                    onCommit={(nextName) => {
-                      if (nextName !== name)
-                        changeRig((current) => updateRigLandmark(current, name, { name: nextName }));
-                    }}
-                  />
-                </label>
-                <VectorField
-                  label={`Landmark ${name} position`}
-                  value={position}
-                  min={-100_000}
-                  max={100_000}
-                  onChange={(nextPosition) =>
-                    changeRig((current) => updateRigLandmark(current, name, { position: nextPosition }))
-                  }
-                />
-                <button
-                  type="button"
-                  aria-label={`Remove landmark ${name}`}
-                  onClick={() => changeRig((current) => removeRigLandmark(current, name))}
-                >
-                  Remove landmark
-                </button>
-              </article>
-            ))}
-            <button type="button" onClick={() => changeRig(addRigLandmark)}>
-              + Add landmark
-            </button>
-          </section>
-
-          <section className="studio-component" aria-label="Rig sockets">
-            <div>
-              <strong>Sockets</strong>
-              <small>{rig.sockets.length}/64</small>
-            </div>
-            {rig.sockets.map((socket, index) => {
-              const uses = socketUseCount(project, asset.id, socket.name);
-              return (
-                <article className="studio-catalog-card" key={`${index}:${socket.name}`}>
-                  <label className="studio-field">
-                    Socket {index + 1} name
-                    <input
-                      required
-                      maxLength={64}
-                      pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
-                      value={socket.name}
-                      disabled={uses > 0}
-                      onChange={(event) => {
-                        const nextName = event.target.value;
-                        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(nextName)) return;
-                        if (
-                          rig.sockets.some((entry) => entry.name === nextName && entry.name !== socket.name)
-                        ) {
-                          setError('Socket names must be unique.');
-                          return;
-                        }
-                        updateSocket(socket.name, { name: nextName });
-                      }}
+                      onChange={(position) => updateJoint(joint.name, { position })}
                     />
-                  </label>
-                  <label className="studio-field">
-                    Attached joint
-                    <select
-                      aria-label={`Socket ${socket.name} joint`}
-                      value={socket.joint}
-                      onChange={(event) => updateSocket(socket.name, { joint: event.target.value })}
-                    >
-                      {rig.joints.map((joint) => (
-                        <option key={joint.name} value={joint.name}>
-                          {joint.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <VectorField
-                    label={`Socket ${socket.name} position`}
-                    value={socket.transform.position}
-                    min={-100_000}
-                    max={100_000}
-                    onChange={(position) =>
-                      updateSocket(socket.name, {
-                        transform: { ...socket.transform, position },
-                      })
-                    }
-                  />
-                  <VectorField
-                    label={`Socket ${socket.name} rotation`}
-                    value={socket.transform.rotation}
-                    min={-100_000}
-                    max={100_000}
-                    onChange={(rotation) =>
-                      updateSocket(socket.name, {
-                        transform: { ...socket.transform, rotation },
-                      })
-                    }
-                  />
-                  <VectorField
-                    label={`Socket ${socket.name} scale`}
-                    value={socket.transform.scale}
-                    min={0.001}
-                    max={1000}
-                    onChange={(scale) =>
-                      updateSocket(socket.name, {
-                        transform: { ...socket.transform, scale },
-                      })
-                    }
-                  />
-                  {socket.fitBounds ? (
-                    <>
-                      <VectorField
-                        label={`Socket ${socket.name} fit minimum · meters`}
-                        value={socket.fitBounds.min}
-                        min={-100_000}
-                        max={100_000}
-                        onChange={(min) =>
-                          updateSocket(socket.name, { fitBounds: { ...socket.fitBounds!, min } })
-                        }
-                      />
-                      <VectorField
-                        label={`Socket ${socket.name} fit maximum · meters`}
-                        value={socket.fitBounds.max}
-                        min={-100_000}
-                        max={100_000}
-                        onChange={(max) =>
-                          updateSocket(socket.name, { fitBounds: { ...socket.fitBounds!, max } })
-                        }
-                      />
+                    <VectorField
+                      label={`Joint ${joint.name} bind rotation (radians)`}
+                      value={joint.rotation}
+                      min={-Math.PI * 2}
+                      max={Math.PI * 2}
+                      disabled={Boolean(jointEditBlock)}
+                      onChange={(rotation) => updateJoint(joint.name, { rotation })}
+                    />
+                    <div className="studio-catalog-card-actions">
+                      {removeBlock && <small>{removeBlock}</small>}
                       <button
                         type="button"
-                        onClick={() => updateSocket(socket.name, { fitBounds: undefined })}
+                        aria-label={`Remove joint ${joint.name}`}
+                        disabled={Boolean(removeBlock)}
+                        title={removeBlock ?? undefined}
+                        onClick={() => {
+                          try {
+                            const next = removeRigJoint(asset, joint.name);
+                            onChange(next);
+                            onJsonChange(JSON.stringify(next.rig, null, 2));
+                            setError('');
+                          } catch (cause) {
+                            setError((cause as Error).message);
+                          }
+                        }}
                       >
-                        Remove equipment fit bounds
+                        Remove joint
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
+                    </div>
+                  </article>
+                );
+              })}
+              {jointEditBlock && <small role="status">{jointEditBlock}</small>}
+              <button
+                type="button"
+                disabled={rig.joints.length >= 128 || Boolean(jointEditBlock)}
+                onClick={() => changeRig(addRigJoint)}
+              >
+                + Add joint
+              </button>
+            </section>
+          </details>
+
+          <details>
+            <summary>Landmark positions · {Object.keys(rig.landmarks).length}</summary>
+            <section className="studio-component" aria-label="Rig landmarks">
+              <div>
+                <strong>Landmarks</strong>
+                <small>{Object.keys(rig.landmarks).length}</small>
+              </div>
+              {Object.entries(rig.landmarks).map(([name, position], index) => (
+                <article className="studio-catalog-card" key={name}>
+                  <label className="studio-field">
+                    <LandmarkNameField
+                      index={index}
+                      name={name}
+                      onCommit={(nextName) => {
+                        if (nextName !== name)
+                          changeRig((current) => updateRigLandmark(current, name, { name: nextName }));
+                      }}
+                    />
+                  </label>
+                  <VectorField
+                    label={`Landmark ${name} position`}
+                    value={position}
+                    min={-100_000}
+                    max={100_000}
+                    onChange={(nextPosition) =>
+                      changeRig((current) => updateRigLandmark(current, name, { position: nextPosition }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Remove landmark ${name}`}
+                    onClick={() => changeRig((current) => removeRigLandmark(current, name))}
+                  >
+                    Remove landmark
+                  </button>
+                </article>
+              ))}
+              <button type="button" onClick={() => changeRig(addRigLandmark)}>
+                + Add landmark
+              </button>
+            </section>
+          </details>
+
+          <details>
+            <summary>Socket transforms and fit bounds · {rig.sockets.length}/64 sockets</summary>
+            <section className="studio-component" aria-label="Rig sockets">
+              <div>
+                <strong>Sockets</strong>
+                <small>{rig.sockets.length}/64</small>
+              </div>
+              {rig.sockets.map((socket, index) => {
+                const uses = socketUseCount(project, asset.id, socket.name);
+                return (
+                  <article className="studio-catalog-card" key={`${index}:${socket.name}`}>
+                    <label className="studio-field">
+                      Socket {index + 1} name
+                      <input
+                        required
+                        maxLength={64}
+                        pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"
+                        value={socket.name}
+                        disabled={uses > 0}
+                        onChange={(event) => {
+                          const nextName = event.target.value;
+                          if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(nextName)) return;
+                          if (
+                            rig.sockets.some((entry) => entry.name === nextName && entry.name !== socket.name)
+                          ) {
+                            setError('Socket names must be unique.');
+                            return;
+                          }
+                          updateSocket(socket.name, { name: nextName });
+                        }}
+                      />
+                    </label>
+                    <label className="studio-field">
+                      Attached joint
+                      <select
+                        aria-label={`Socket ${socket.name} joint`}
+                        value={socket.joint}
+                        onChange={(event) => updateSocket(socket.name, { joint: event.target.value })}
+                      >
+                        {rig.joints.map((joint) => (
+                          <option key={joint.name} value={joint.name}>
+                            {joint.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <VectorField
+                      label={`Socket ${socket.name} position`}
+                      value={socket.transform.position}
+                      min={-100_000}
+                      max={100_000}
+                      onChange={(position) =>
                         updateSocket(socket.name, {
-                          fitBounds: { min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] },
+                          transform: { ...socket.transform, position },
                         })
                       }
-                    >
-                      Add equipment fit bounds
-                    </button>
-                  )}
-                  <div className="studio-catalog-card-actions">
-                    {uses > 0 && (
-                      <small>
-                        Used by {uses} attachment(s); change those references before renaming or removing it.
-                      </small>
-                    )}
-                    <button
-                      type="button"
-                      aria-label={`Remove socket ${socket.name}`}
-                      disabled={uses > 0}
-                      title={uses ? 'Change attached equipment references first.' : undefined}
-                      onClick={() =>
-                        changeRig((current) => ({
-                          ...current,
-                          sockets: current.sockets.filter((entry) => entry.name !== socket.name),
-                        }))
+                    />
+                    <VectorField
+                      label={`Socket ${socket.name} rotation`}
+                      value={socket.transform.rotation}
+                      min={-100_000}
+                      max={100_000}
+                      onChange={(rotation) =>
+                        updateSocket(socket.name, {
+                          transform: { ...socket.transform, rotation },
+                        })
                       }
-                    >
-                      Remove socket
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-            <button type="button" disabled={rig.sockets.length >= 64} onClick={() => changeRig(addRigSocket)}>
-              + Add socket
-            </button>
-          </section>
+                    />
+                    <VectorField
+                      label={`Socket ${socket.name} scale`}
+                      value={socket.transform.scale}
+                      min={0.001}
+                      max={1000}
+                      onChange={(scale) =>
+                        updateSocket(socket.name, {
+                          transform: { ...socket.transform, scale },
+                        })
+                      }
+                    />
+                    {socket.fitBounds ? (
+                      <>
+                        <VectorField
+                          label={`Socket ${socket.name} fit minimum · meters`}
+                          value={socket.fitBounds.min}
+                          min={-100_000}
+                          max={100_000}
+                          onChange={(min) =>
+                            updateSocket(socket.name, { fitBounds: { ...socket.fitBounds!, min } })
+                          }
+                        />
+                        <VectorField
+                          label={`Socket ${socket.name} fit maximum · meters`}
+                          value={socket.fitBounds.max}
+                          min={-100_000}
+                          max={100_000}
+                          onChange={(max) =>
+                            updateSocket(socket.name, { fitBounds: { ...socket.fitBounds!, max } })
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateSocket(socket.name, { fitBounds: undefined })}
+                        >
+                          Remove equipment fit bounds
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSocket(socket.name, {
+                            fitBounds: { min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] },
+                          })
+                        }
+                      >
+                        Add equipment fit bounds
+                      </button>
+                    )}
+                    <div className="studio-catalog-card-actions">
+                      {uses > 0 && (
+                        <small>
+                          Used by {uses} attachment(s); change those references before renaming or removing
+                          it.
+                        </small>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Remove socket ${socket.name}`}
+                        disabled={uses > 0}
+                        title={uses ? 'Change attached equipment references first.' : undefined}
+                        onClick={() =>
+                          changeRig((current) => ({
+                            ...current,
+                            sockets: current.sockets.filter((entry) => entry.name !== socket.name),
+                          }))
+                        }
+                      >
+                        Remove socket
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              <button
+                type="button"
+                disabled={rig.sockets.length >= 64}
+                onClick={() => changeRig(addRigSocket)}
+              >
+                + Add socket
+              </button>
+            </section>
+          </details>
           <section className="studio-component" aria-label="Animation clips">
             <div>
               <strong>Animation clips</strong>
@@ -735,10 +749,7 @@ export function RigEditor({
                       <div className="studio-catalog-card-actions">
                         <button
                           type="button"
-                          disabled={
-                            track.keys.length >= 2048 ||
-                            Math.max(...track.keys.map((key) => key.time)) >= clip.duration
-                          }
+                          disabled={track.keys.length >= 2048}
                           onClick={() =>
                             changeRig((current) => addRigKeyframe(current, clip.name, track.joint))
                           }
@@ -832,45 +843,48 @@ export function RigEditor({
                         onChange={(event) => setRetargetClipName(event.target.value)}
                       />
                     </label>
-                    <fieldset className="studio-component">
-                      <legend>Joint mapping</legend>
-                      {retargetSourceClip.tracks.map((track) => {
-                        const mapped = effectiveRetargetMap.find(
-                          (entry) => entry.sourceJoint === track.joint,
-                        )?.targetJoint;
-                        const usedByOtherTracks = new Set(
-                          effectiveRetargetMap
-                            .filter((entry) => entry.sourceJoint !== track.joint)
-                            .map((entry) => entry.targetJoint),
-                        );
-                        return (
-                          <label className="studio-field" key={track.joint}>
-                            {track.joint}
-                            <select
-                              aria-label={`Map source joint ${track.joint}`}
-                              value={mapped ?? ''}
-                              onChange={(event) =>
-                                setRetargetMap((current) => ({
-                                  ...current,
-                                  [track.joint]: event.target.value,
-                                }))
-                              }
-                            >
-                              <option value="">Skip this track</option>
-                              {rig.joints.map((joint) => (
-                                <option
-                                  key={joint.name}
-                                  value={joint.name}
-                                  disabled={joint.name !== mapped && usedByOtherTracks.has(joint.name)}
-                                >
-                                  {joint.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        );
-                      })}
-                    </fieldset>
+                    <details>
+                      <summary>Joint mapping · {retargetSourceClip.tracks.length} source track(s)</summary>
+                      <fieldset className="studio-component">
+                        <legend>Joint mapping</legend>
+                        {retargetSourceClip.tracks.map((track) => {
+                          const mapped = effectiveRetargetMap.find(
+                            (entry) => entry.sourceJoint === track.joint,
+                          )?.targetJoint;
+                          const usedByOtherTracks = new Set(
+                            effectiveRetargetMap
+                              .filter((entry) => entry.sourceJoint !== track.joint)
+                              .map((entry) => entry.targetJoint),
+                          );
+                          return (
+                            <label className="studio-field" key={track.joint}>
+                              {track.joint}
+                              <select
+                                aria-label={`Map source joint ${track.joint}`}
+                                value={mapped ?? ''}
+                                onChange={(event) =>
+                                  setRetargetMap((current) => ({
+                                    ...current,
+                                    [track.joint]: event.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Skip this track</option>
+                                {rig.joints.map((joint) => (
+                                  <option
+                                    key={joint.name}
+                                    value={joint.name}
+                                    disabled={joint.name !== mapped && usedByOtherTracks.has(joint.name)}
+                                  >
+                                    {joint.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                      </fieldset>
+                    </details>
                     <small>
                       Mapped rotation deltas are automatically converted between the source and target bind
                       axes. Unmapped tracks are skipped; key position offsets preserve meters across different

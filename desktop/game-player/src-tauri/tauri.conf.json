@@ -1,21 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "VoxShop Game",
+  "productName": "VoxShop Game Player",
   "version": "2.0.0-alpha.1",
-  "identifier": "com.hexxisstudios.voxshop.game",
+  "identifier": "com.hexxisstudios.voxshop.game-player",
   "build": {
-    "frontendDist": "../../../.voxshop/game-player"
+    "frontendDist": "../frontend"
   },
   "app": {
-    "windows": [
-      {
-        "title": "VoxShop Game — Hexxis Studios",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 1024,
-        "minHeight": 700
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src blob:; style-src 'unsafe-inline'; img-src data: blob:; media-src data:; connect-src wss: ws://localhost:* ws://127.0.0.1:* ws://[::1]:*; font-src 'none';"
     }
@@ -30,8 +22,8 @@
       "../../../src-tauri/icons/128x128@2x.png"
     ],
     "publisher": "Hexxis Studios",
-    "shortDescription": "A standalone game by Hexxis Studios",
-    "longDescription": "A standalone game created with VoxShop by Hexxis Studios.",
+    "shortDescription": "VoxShop standalone game player",
+    "longDescription": "Runs self-contained games exported from VoxShop.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
